@@ -306,7 +306,7 @@ fun ReaderSettingsDialog(
     onDismiss: () -> Unit,
     onServerUrlChange: (String) -> Unit
 ) {
-    var serverUrl by remember { mutableStateOf("http://221.132.21.49:8765") }
+    var serverUrl by remember { mutableStateOf("http://221.132.21.49:8080") }
 
     AlertDialog(
         onDismissRequest = onDismiss,
