@@ -46,13 +46,12 @@ fun ReaderScreen(
     val lazyListState = rememberLazyListState()
     val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
 
-    // Auto-scroll: chỉ scroll khi câu đang đọc ra khỏi màn hình (hết trang)
+    // Auto-scroll: chỉ scroll khi câu đang đọc vượt quá item cuối trên màn hình
     LaunchedEffect(currentSentenceIndex) {
         if (ttsState == TtsState.PLAYING && sentences.isNotEmpty()) {
-            val visibles = lazyListState.layoutInfo.visibleItemsInfo
+            val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
             val targetIndex = currentSentenceIndex + 1 // +1 vì item 0 = chapter title
-            val isVisible = visibles.any { it.index == targetIndex }
-            if (!isVisible) {
+            if (lastVisible != null && targetIndex > lastVisible.index) {
                 lazyListState.animateScrollToItem(targetIndex)
             }
         }
