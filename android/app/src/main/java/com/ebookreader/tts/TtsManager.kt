@@ -20,6 +20,11 @@ class TtsManager(
     private var currentChunkIndex = 0
     private var chunks: List<List<SentenceSpan>> = emptyList()
 
+    // Pre-buffer: next sentence audio ready to play
+    private var nextAudioBytes: ByteArray? = null
+    private var nextSentenceIndex: Int = -1
+    private var prebufferJob: Job? = null
+
     var state: TtsState = TtsState.IDLE
         private set
 
@@ -48,6 +53,8 @@ class TtsManager(
         chunks = textChunker.splitIntoChunks(sentences)
         currentSentenceIndex = 0
         currentChunkIndex = 0
+        nextAudioBytes = null
+        prebufferJob?.cancel()
     }
 
     fun loadSentences(sentences: List<SentenceSpan>) {
@@ -55,6 +62,8 @@ class TtsManager(
         chunks = textChunker.splitIntoChunks(sentences)
         currentSentenceIndex = 0
         currentChunkIndex = 0
+        nextAudioBytes = null
+        prebufferJob?.cancel()
     }
 
     fun play() {
@@ -62,6 +71,8 @@ class TtsManager(
             TtsState.IDLE, TtsState.STOPPED -> {
                 currentSentenceIndex = 0
                 currentChunkIndex = 0
+                nextAudioBytes = null
+                prebufferJob?.cancel()
                 playCurrentSentence()
             }
             TtsState.PAUSED -> {
@@ -81,6 +92,8 @@ class TtsManager(
 
     fun stop() {
         playJob?.cancel()
+        prebufferJob?.cancel()
+        nextAudioBytes = null
         player.stop()
         setState(TtsState.STOPPED)
     }
@@ -88,8 +101,9 @@ class TtsManager(
     fun seekToSentence(index: Int) {
         if (index < 0 || index >= sentences.size) return
         currentSentenceIndex = index
-        // Find which chunk this sentence belongs to
         currentChunkIndex = getChunkForSentence(index)
+        nextAudioBytes = null
+        prebufferJob?.cancel()
 
         if (state == TtsState.PLAYING || state == TtsState.PAUSED) {
             player.stop()
@@ -98,9 +112,7 @@ class TtsManager(
     }
 
     fun getCurrentSentenceIndex(): Int = currentSentenceIndex
-
     fun getSentenceCount(): Int = sentences.size
-
     fun getSentences(): List<SentenceSpan> = sentences
 
     fun seekForward() {
@@ -113,6 +125,7 @@ class TtsManager(
 
     fun cleanup() {
         playJob?.cancel()
+        prebufferJob?.cancel()
         scope.cancel()
         player.cleanup()
     }
@@ -130,34 +143,81 @@ class TtsManager(
             val sentence = sentences[currentSentenceIndex]
             onSentenceChanged?.invoke(currentSentenceIndex, sentence)
 
-            // Check cache first
-            val cached = audioCache?.get(sentence.text, voice, rate)
-            val audioBytes = if (cached != null) {
-                cached
+            // Use pre-buffered audio if available
+            val audioBytes = if (nextAudioBytes != null && nextSentenceIndex == currentSentenceIndex) {
+                val bytes = nextAudioBytes!!
+                nextAudioBytes = null
+                bytes
             } else {
-                val result = client.synthesize(sentence.text, voice, rate)
-                if (result.isSuccess) {
-                    val bytes = result.getOrThrow()
-                    audioCache?.put(sentence.text, voice, rate, bytes)
-                    bytes
-                } else {
-                    withContext(Dispatchers.Main) {
-                        onError?.invoke(result.exceptionOrNull()?.message ?: "TTS failed")
-                    }
-                    setState(TtsState.IDLE)
-                    return@launch
-                }
+                synthesizeSentence(sentence) ?: return@launch
             }
 
             withContext(Dispatchers.Main) {
                 player.play(audioBytes)
                 setState(TtsState.PLAYING)
             }
+
+            // Start pre-buffering the next sentence immediately
+            startPrebuffer()
+        }
+    }
+
+    private suspend fun synthesizeSentence(sentence: SentenceSpan): ByteArray? {
+        // Check cache first
+        val cached = audioCache?.get(sentence.text, voice, rate)
+        if (cached != null) return cached
+
+        val result = client.synthesize(sentence.text, voice, rate)
+        return if (result.isSuccess) {
+            val bytes = result.getOrThrow()
+            audioCache?.put(sentence.text, voice, rate, bytes)
+            bytes
+        } else {
+            withContext(Dispatchers.Main) {
+                onError?.invoke(result.exceptionOrNull()?.message ?: "TTS failed")
+            }
+            setState(TtsState.IDLE)
+            null
+        }
+    }
+
+    /**
+     * Start synthesizing the NEXT sentence in background while current one plays.
+     */
+    private fun startPrebuffer() {
+        val nextIdx = currentSentenceIndex + 1
+        if (nextIdx >= sentences.size) return
+
+        prebufferJob?.cancel()
+        nextAudioBytes = null
+        nextSentenceIndex = -1
+
+        prebufferJob = scope.launch {
+            val sentence = sentences[nextIdx]
+            // Check cache first (fast path)
+            val cached = audioCache?.get(sentence.text, voice, rate)
+            if (cached != null) {
+                nextAudioBytes = cached
+                nextSentenceIndex = nextIdx
+                return@launch
+            }
+
+            // Synthesize in background
+            val result = client.synthesize(sentence.text, voice, rate)
+            if (result.isSuccess) {
+                val bytes = result.getOrThrow()
+                audioCache?.put(sentence.text, voice, rate, bytes)
+                nextAudioBytes = bytes
+                nextSentenceIndex = nextIdx
+            }
+            // On failure, nextSentenceIndex stays -1, playNextSentence will synthesize inline
         }
     }
 
     private fun playNextSentence() {
         currentSentenceIndex++
+        // Start pre-buffering the one after next
+        startPrebuffer()
         playCurrentSentence()
     }
 

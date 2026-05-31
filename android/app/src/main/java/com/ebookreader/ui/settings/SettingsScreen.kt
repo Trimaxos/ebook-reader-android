@@ -16,6 +16,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.ebookreader.tts.VoiceInfo
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -147,14 +148,51 @@ fun SettingsScreen(
 
             if (voices.isNotEmpty()) {
                 var expandedVoice by remember { mutableStateOf(false) }
+                var voiceFilter by remember { mutableStateOf("") }
                 val selectedVoice = voices.find { it.shortName == settings.ttsVoice }
+
+                // Sort voices: Vietnamese first, then popular multilingual, then rest
+                val popularMultilingual = setOf(
+                    "en-US-AvaMultilingualNeural", "en-US-AndrewMultilingualNeural",
+                    "de-DE-KatjaNeural", "de-DE-SeraphinaMultilingualNeural",
+                    "ko-KR-SunHiNeural", "fr-FR-DeniseNeural",
+                    "ja-JP-NanamiNeural", "zh-CN-XiaoxiaoMultilingualNeural"
+                )
+                fun voicePriority(v: VoiceInfo): Int = when {
+                    v.locale == "vi-VN" -> 0
+                    v.shortName in popularMultilingual -> 1
+                    "Multilingual" in v.shortName -> 2
+                    else -> 3
+                }
+                val sortedVoices = voices.sortedWith(
+                    Comparator { a: VoiceInfo, b: VoiceInfo ->
+                        val pa = voicePriority(a)
+                        val pb = voicePriority(b)
+                        if (pa != pb) pa - pb
+                        else {
+                            val lc = a.locale.compareTo(b.locale)
+                            if (lc != 0) lc
+                            else a.friendlyName.compareTo(b.friendlyName)
+                        }
+                    }
+                )
+
+                val filteredVoices = if (voiceFilter.isBlank()) sortedVoices
+                else sortedVoices.filter {
+                    it.friendlyName.contains(voiceFilter, ignoreCase = true) ||
+                    it.locale.contains(voiceFilter, ignoreCase = true) ||
+                    it.shortName.contains(voiceFilter, ignoreCase = true)
+                }
+
+                // Current locale label
+                var lastLocale = ""
 
                 ExposedDropdownMenuBox(
                     expanded = expandedVoice,
                     onExpandedChange = { expandedVoice = it }
                 ) {
                     OutlinedTextField(
-                        value = selectedVoice?.friendlyName ?: settings.ttsVoice,
+                        value = selectedVoice?.let { "${it.friendlyName} (${it.locale})" } ?: settings.ttsVoice,
                         onValueChange = {},
                         readOnly = true,
                         label = { Text("Giọng đọc") },
@@ -165,15 +203,59 @@ fun SettingsScreen(
                     )
                     ExposedDropdownMenu(
                         expanded = expandedVoice,
-                        onDismissRequest = { expandedVoice = false }
+                        onDismissRequest = { expandedVoice = false; voiceFilter = "" },
+                        modifier = Modifier.heightIn(max = 500.dp)
                     ) {
-                        voices.forEach { voice ->
+                        // Filter/search field
+                        OutlinedTextField(
+                            value = voiceFilter,
+                            onValueChange = { voiceFilter = it },
+                            placeholder = { Text("Tìm giọng đọc...") },
+                            singleLine = true,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                            leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) }
+                        )
+                        HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+
+                        filteredVoices.forEach { voice ->
+                            // Show locale header when locale changes
+                            if (voice.locale != lastLocale) {
+                                lastLocale = voice.locale
+                                DropdownMenuItem(
+                                    text = {
+                                        Text(
+                                            voice.locale,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                    },
+                                    onClick = { },
+                                    enabled = false
+                                )
+                            }
                             DropdownMenuItem(
                                 text = {
                                     Column {
-                                        Text(voice.friendlyName)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                voice.friendlyName,
+                                                fontWeight = if (voice.shortName == settings.ttsVoice) FontWeight.Bold else FontWeight.Normal
+                                            )
+                                            if (voice.shortName in popularMultilingual) {
+                                                Text(
+                                                    "🌐",
+                                                    style = MaterialTheme.typography.bodySmall
+                                                )
+                                            }
+                                        }
                                         Text(
-                                            "${voice.locale} - ${voice.gender}",
+                                            "${voice.gender} · ${voice.shortName}",
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant
                                         )
@@ -182,6 +264,7 @@ fun SettingsScreen(
                                 onClick = {
                                     viewModel.updateTtsVoice(voice.shortName)
                                     expandedVoice = false
+                                    voiceFilter = ""
                                 }
                             )
                         }

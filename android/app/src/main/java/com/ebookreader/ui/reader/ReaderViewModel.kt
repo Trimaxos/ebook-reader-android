@@ -1,6 +1,8 @@
 package com.ebookreader.ui.reader
 
 import android.app.Application
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.datastore.preferences.preferencesDataStore
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.ebookreader.data.db.AppDatabase
@@ -9,13 +11,19 @@ import com.ebookreader.data.model.Book
 import com.ebookreader.data.model.Chapter
 import com.ebookreader.data.model.ReadingProgress
 import com.ebookreader.tts.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+
+// Shared DataStore instance (same key as SettingsViewModel)
+private val Application.readerDataStore by preferencesDataStore(name = "settings")
 
 class ReaderViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getInstance(application)
     private val parser = EpubParser()
+    private val dataStore = application.readerDataStore
 
     val ttsClient = TtsClient()
     val ttsPlayer = TtsPlayer(application)
@@ -42,6 +50,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     private var book: Book? = null
     private var restoredSentenceOffset: Int = 0
 
+    companion object {
+        private val KEY_TTS_VOICE = stringPreferencesKey("tts_voice")
+        private val KEY_TTS_RATE = stringPreferencesKey("tts_rate")
+    }
+
     init {
         ttsManager.onStateChanged = { state ->
             _ttsState.value = state
@@ -49,12 +62,26 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         ttsManager.onSentenceChanged = { index, _ ->
             _currentSentenceIndex.value = index
         }
+
+        // Load voice/rate from settings and apply
+        viewModelScope.launch {
+            dataStore.data.collect { prefs ->
+                val voice = prefs[KEY_TTS_VOICE] ?: "vi-VN-HoaiMyNeural"
+                val rate = prefs[KEY_TTS_RATE] ?: "+0%"
+                ttsManager.setVoice(voice)
+                ttsManager.setRate(rate)
+            }
+        }
     }
 
     fun loadBook(book: Book) {
         this.book = book
         viewModelScope.launch {
-            val (chapters, _) = parser.parse(getApplication(), book.filePath)
+            _currentChapter.value = null // show loading
+            // Parse EPUB on IO thread
+            val (chapters, _) = withContext(Dispatchers.IO) {
+                parser.parse(getApplication(), book.filePath)
+            }
             _chapters.value = chapters
 
             // Restore progress
@@ -125,6 +152,14 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun updateTtsServerUrl(url: String) {
         ttsClient.updateServerUrl(url)
+    }
+
+    fun updateVoice(voice: String) {
+        ttsManager.setVoice(voice)
+    }
+
+    fun updateRate(rate: String) {
+        ttsManager.setRate(rate)
     }
 
     override fun onCleared() {

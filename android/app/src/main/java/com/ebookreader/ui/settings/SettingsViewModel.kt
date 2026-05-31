@@ -53,6 +53,18 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     init {
         loadSettings()
+        // Auto-load voices on first open (ignore failure — user can test connection manually)
+        viewModelScope.launch {
+            try {
+                val settings = _settings.first { it.ttsServerUrl.isNotEmpty() }
+                ttsClient.updateServerUrl(settings.ttsServerUrl)
+                ttsClient.updateApiKey(settings.ttsApiKey)
+                val result = ttsClient.getVoices()
+                if (result.isSuccess) {
+                    _voices.value = result.getOrThrow()
+                }
+            } catch (_: Exception) { }
+        }
     }
 
     private fun loadSettings() {

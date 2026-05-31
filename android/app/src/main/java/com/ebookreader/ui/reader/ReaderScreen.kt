@@ -165,7 +165,11 @@ fun ReaderScreen(
             onDismissRequest = { showChapterPicker = false },
             title = { Text("Chọn chương") },
             text = {
-                Column {
+                Column(
+                    modifier = Modifier
+                        .verticalScroll(rememberScrollState())
+                        .heightIn(max = 400.dp)
+                ) {
                     chapters.forEachIndexed { index, chapter ->
                         TextButton(
                             onClick = {
