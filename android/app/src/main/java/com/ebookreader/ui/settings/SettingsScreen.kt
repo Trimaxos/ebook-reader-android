@@ -13,6 +13,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewmodel.compose.viewModel
 
@@ -67,6 +68,21 @@ fun SettingsScreen(
                     Icon(Icons.Default.Dns, contentDescription = null)
                 },
                 keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri)
+            )
+
+            // API Key
+            OutlinedTextField(
+                value = settings.ttsApiKey,
+                onValueChange = { viewModel.updateTtsApiKey(it) },
+                label = { Text("API Key") },
+                placeholder = { Text("Nhập API key để xác thực") },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                leadingIcon = {
+                    Icon(Icons.Default.Key, contentDescription = null)
+                },
+                visualTransformation = PasswordVisualTransformation(),
+                keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password)
             )
 
             // Connection test

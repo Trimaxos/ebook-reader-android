@@ -3,23 +3,27 @@ Edge TTS Proxy Server
 ---------------------
 Lightweight FastAPI server wrapping Microsoft Edge TTS.
 Exposes HTTP endpoints for Android ebook reader app.
+Protected by X-API-Key header authentication.
 
 Usage:
-    uvicorn main:app --host 0.0.0.0 --port 8765
+    uvicorn main:app --host 0.0.0.0 --port 8080
 
 Endpoints:
-    GET  /health          → Health check + available voices
-    GET  /voices          → List all available Edge TTS voices
-    POST /tts             → Synthesize text to speech (streaming audio/mpeg)
+    GET  /health          → Health check (no auth) + voice count (with auth)
+    GET  /voices          → List all available Edge TTS voices (auth required)
+    POST /tts             → Synthesize text to speech (auth required, streaming audio/mpeg)
 """
 
 import logging
+import os
 import time
+import secrets
 
 import edge_tts
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from fastapi.security import HTTPBearer
 from pydantic import BaseModel, Field
 
 # ── Logging ──────────────────────────────────────────────────────────────────
@@ -34,13 +38,44 @@ DEFAULT_VOICE = "vi-VN-HoaiMyNeural"
 DEFAULT_RATE = "+0%"
 DEFAULT_PITCH = "+0Hz"
 MAX_TEXT_LENGTH = 3000
-SERVER_VERSION = "1.0.0"
+SERVER_VERSION = "1.1.0"
+
+# ── API Key Auth ─────────────────────────────────────────────────────────────
+# Default key — change via environment variable EDGE_TTS_API_KEY
+API_KEY = os.getenv(
+    "EDGE_TTS_API_KEY",
+    "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
+)
+
+security = HTTPBearer(auto_error=False)
+
+
+async def verify_api_key(request: Request, credentials=Depends(security)):
+    """FastAPI dependency: require valid X-API-Key in header."""
+    # Accept X-API-Key header OR Bearer token
+    api_key = request.headers.get("x-api-key", "")
+    if not api_key and credentials:
+        api_key = credentials.credentials
+    if not api_key or not secrets.compare_digest(api_key, API_KEY):
+        raise HTTPException(status_code=401, detail="Invalid or missing API key. Use X-API-Key header.")
+    return True
+
+
+def has_api_key(request: Request) -> bool:
+    """Check if request has a valid API key (without throwing)."""
+    api_key = request.headers.get("x-api-key", "")
+    if not api_key:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.startswith("Bearer "):
+            api_key = auth_header[7:]
+    return secrets.compare_digest(api_key, API_KEY)
+
 
 # ── App Setup ────────────────────────────────────────────────────────────────
 app = FastAPI(
     title="Edge TTS Proxy Server",
     version=SERVER_VERSION,
-    description="Free, unlimited TTS proxy for Android ebook reader using Microsoft Edge TTS.",
+    description="Free, unlimited TTS proxy for Android ebook reader using Microsoft Edge TTS. Protected by API key.",
 )
 
 app.add_middleware(
@@ -71,6 +106,7 @@ _voices_cache = None
 _voices_cache_time = 0
 VOICES_CACHE_TTL = 300  # 5 minutes
 
+
 async def _get_voices():
     """Get full voice list (cached with TTL)."""
     global _voices_cache, _voices_cache_time
@@ -85,24 +121,28 @@ async def _get_voices():
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
 @app.get("/health")
-async def health():
-    """Health check endpoint. Returns server status and voice count."""
-    try:
-        voices = await _get_voices()
-        return {
-            "status": "ok",
-            "version": SERVER_VERSION,
-            "voice_count": len(voices),
-            "default_voice": DEFAULT_VOICE,
-        }
-    except Exception as e:
-        log.error(f"Health check failed: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+async def health(request: Request):
+    """Health check. Basic status always available; voice count only with API key."""
+    base = {
+        "status": "ok",
+        "version": SERVER_VERSION,
+        "auth_required": True,
+    }
+    if has_api_key(request):
+        try:
+            voices = await _get_voices()
+            base["voice_count"] = len(voices)
+            base["default_voice"] = DEFAULT_VOICE
+            base["authenticated"] = True
+        except Exception as e:
+            log.error(f"Health check failed: {e}")
+            base["voice_count_error"] = str(e)
+    return base
 
 
 @app.get("/voices")
-async def list_voices():
-    """List all available Edge TTS voices with metadata."""
+async def list_voices(_: bool = Depends(verify_api_key)):
+    """List all available Edge TTS voices with metadata. (Auth required)"""
     try:
         voices = await _get_voices()
         result = []
@@ -121,9 +161,9 @@ async def list_voices():
 
 
 @app.post("/tts")
-async def text_to_speech(request: TTSRequest):
+async def text_to_speech(request: TTSRequest, _: bool = Depends(verify_api_key)):
     """
-    Synthesize text to speech using Edge TTS.
+    Synthesize text to speech using Edge TTS. (Auth required)
     Returns streaming audio/mpeg response.
     """
     text = request.text.strip()
@@ -179,11 +219,10 @@ async def text_to_speech(request: TTSRequest):
 
 
 @app.post("/tts/short")
-async def text_to_speech_short(request: TTSRequestShort):
+async def text_to_speech_short(request: TTSRequestShort, _: bool = Depends(verify_api_key)):
     """
-    Optimized endpoint for short text (under 200 chars).
+    Optimized endpoint for short text (under 200 chars). (Auth required)
     Returns complete audio MP3 bytes (non-streaming).
-    Useful for UI previews or single-sentence playback.
     """
     text = request.text.strip()
     voice = request.voice or DEFAULT_VOICE
@@ -227,8 +266,9 @@ async def text_to_speech_short(request: TTSRequestShort):
 # ── Main ─────────────────────────────────────────────────────────────────────
 if __name__ == "__main__":
     import uvicorn
-    print(f"🚀 Edge TTS Proxy Server v{SERVER_VERSION}")
+    print(f"\U0001f680 Edge TTS Proxy Server v{SERVER_VERSION}")
     print(f"   Default voice: {DEFAULT_VOICE}")
     print(f"   Max text length: {MAX_TEXT_LENGTH} chars")
+    print(f"   API Key auth: ENABLED (set EDGE_TTS_API_KEY env var to change)")
     print()
-    uvicorn.run(app, host="0.0.0.0", port=8765)
+    uvicorn.run(app, host="0.0.0.0", port=8080)

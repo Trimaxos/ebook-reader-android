@@ -10,7 +10,10 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-class TtsClient(private var serverUrl: String = "http://221.132.21.49:8080") {
+class TtsClient(
+    private var serverUrl: String = "http://221.132.21.49:8080",
+    private var apiKey: String = "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
+) {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -22,15 +25,23 @@ class TtsClient(private var serverUrl: String = "http://221.132.21.49:8080") {
         serverUrl = url.trimEnd('/')
     }
 
+    fun updateApiKey(key: String) {
+        apiKey = key
+    }
+
     fun getServerUrl(): String = serverUrl
+
+    private fun addAuth(builder: Request.Builder) {
+        builder.header("X-API-Key", apiKey)
+    }
 
     suspend fun healthCheck(): Result<JSONObject> = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder()
+            val builder = Request.Builder()
                 .url("$serverUrl/health")
                 .get()
-                .build()
-            val response = client.newCall(request).execute()
+            addAuth(builder)
+            val response = client.newCall(builder.build()).execute()
             if (response.isSuccessful) {
                 val json = JSONObject(response.body?.string().orEmpty())
                 Result.success(json)
@@ -58,12 +69,12 @@ class TtsClient(private var serverUrl: String = "http://221.132.21.49:8080") {
             val requestBody = json.toString()
                 .toRequestBody("application/json".toMediaTypeOrNull())
 
-            val request = Request.Builder()
+            val builder = Request.Builder()
                 .url("$serverUrl/tts")
                 .post(requestBody)
-                .build()
+            addAuth(builder)
 
-            val response = client.newCall(request).execute()
+            val response = client.newCall(builder.build()).execute()
             if (response.isSuccessful) {
                 val byteStream = ByteArrayOutputStream()
                 response.body?.byteStream()?.use { input ->
@@ -80,11 +91,11 @@ class TtsClient(private var serverUrl: String = "http://221.132.21.49:8080") {
 
     suspend fun getVoices(): Result<List<VoiceInfo>> = withContext(Dispatchers.IO) {
         try {
-            val request = Request.Builder()
+            val builder = Request.Builder()
                 .url("$serverUrl/voices")
                 .get()
-                .build()
-            val response = client.newCall(request).execute()
+            addAuth(builder)
+            val response = client.newCall(builder.build()).execute()
             if (response.isSuccessful) {
                 val json = JSONObject(response.body?.string().orEmpty())
                 val voicesArray = json.getJSONArray("voices")

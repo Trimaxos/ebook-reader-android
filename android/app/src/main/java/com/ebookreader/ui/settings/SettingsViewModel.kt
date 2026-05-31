@@ -19,6 +19,7 @@ private val Application.dataStore: DataStore<Preferences> by preferencesDataStor
 
 data class AppSettings(
     val ttsServerUrl: String = "http://221.132.21.49:8080",
+    val ttsApiKey: String = "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
     val ttsVoice: String = "vi-VN-HoaiMyNeural",
     val ttsRate: String = "+0%",
     val fontSize: Int = 18,
@@ -33,6 +34,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     companion object {
         private val KEY_TTS_SERVER_URL = stringPreferencesKey("tts_server_url")
+        private val KEY_TTS_API_KEY = stringPreferencesKey("tts_api_key")
         private val KEY_TTS_VOICE = stringPreferencesKey("tts_voice")
         private val KEY_TTS_RATE = stringPreferencesKey("tts_rate")
         private val KEY_FONT_SIZE = intPreferencesKey("font_size")
@@ -58,6 +60,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
             dataStore.data.collect { prefs ->
                 _settings.value = AppSettings(
                     ttsServerUrl = prefs[KEY_TTS_SERVER_URL] ?: "http://221.132.21.49:8080",
+                    ttsApiKey = prefs[KEY_TTS_API_KEY] ?: "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
                     ttsVoice = prefs[KEY_TTS_VOICE] ?: "vi-VN-HoaiMyNeural",
                     ttsRate = prefs[KEY_TTS_RATE] ?: "+0%",
                     fontSize = prefs[KEY_FONT_SIZE] ?: 18,
@@ -74,6 +77,15 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
                 prefs[KEY_TTS_SERVER_URL] = url
             }
             ttsClient.updateServerUrl(url)
+        }
+    }
+
+    fun updateTtsApiKey(key: String) {
+        viewModelScope.launch {
+            dataStore.edit { prefs ->
+                prefs[KEY_TTS_API_KEY] = key
+            }
+            ttsClient.updateApiKey(key)
         }
     }
 
@@ -120,16 +132,22 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     fun testConnection() {
         viewModelScope.launch {
             _connectionStatus.value = ConnectionStatus.Testing
-            val url = _settings.value.ttsServerUrl
-            ttsClient.updateServerUrl(url)
+            val settings = _settings.value
+            ttsClient.updateServerUrl(settings.ttsServerUrl)
+            ttsClient.updateApiKey(settings.ttsApiKey)
             val result = ttsClient.healthCheck()
             _connectionStatus.value = if (result.isSuccess) {
-                // Also load available voices
-                val voicesResult = ttsClient.getVoices()
-                if (voicesResult.isSuccess) {
-                    _voices.value = voicesResult.getOrThrow()
+                val json = result.getOrThrow()
+                val authenticated = json.optBoolean("authenticated", false)
+                if (!authenticated) {
+                    ConnectionStatus.Error("API key không hợp lệ")
+                } else {
+                    val voicesResult = ttsClient.getVoices()
+                    if (voicesResult.isSuccess) {
+                        _voices.value = voicesResult.getOrThrow()
+                    }
+                    ConnectionStatus.Connected
                 }
-                ConnectionStatus.Connected
             } else {
                 ConnectionStatus.Error(
                     result.exceptionOrNull()?.message ?: "Kết nối thất bại"
@@ -140,8 +158,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
 
     fun refreshVoices() {
         viewModelScope.launch {
-            val url = _settings.value.ttsServerUrl
-            ttsClient.updateServerUrl(url)
+            val settings = _settings.value
+            ttsClient.updateServerUrl(settings.ttsServerUrl)
+            ttsClient.updateApiKey(settings.ttsApiKey)
             val result = ttsClient.getVoices()
             if (result.isSuccess) {
                 _voices.value = result.getOrThrow()
