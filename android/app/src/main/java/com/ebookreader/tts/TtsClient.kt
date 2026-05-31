@@ -2,6 +2,7 @@ package com.ebookreader.tts
 
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -19,6 +20,7 @@ class TtsClient(
         .connectTimeout(15, TimeUnit.SECONDS)
         .readTimeout(120, TimeUnit.SECONDS)
         .writeTimeout(60, TimeUnit.SECONDS)
+        .connectionPool(ConnectionPool(5, 30, TimeUnit.SECONDS))
         .build()
 
     fun updateServerUrl(url: String) {
