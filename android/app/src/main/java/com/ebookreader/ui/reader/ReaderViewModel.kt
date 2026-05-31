@@ -40,6 +40,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     val sentences: StateFlow<List<SentenceSpan>> = _sentences.asStateFlow()
 
     private var book: Book? = null
+    private var restoredSentenceOffset: Int = 0
 
     init {
         ttsManager.onStateChanged = { state ->
@@ -59,6 +60,9 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             // Restore progress
             val progress = db.readingProgressDao().getProgress(book.id)
             val startChapter = progress?.chapterIndex ?: book.lastReadChapter
+            _currentChapterIndex.value = startChapter
+            restoredSentenceOffset = progress?.charOffset ?: 0
+            _currentSentenceIndex.value = restoredSentenceOffset
             loadChapter(startChapter)
         }
     }
@@ -66,6 +70,12 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     fun loadChapter(index: Int) {
         val chaps = _chapters.value
         if (index < 0 || index >= chaps.size) return
+
+        // Save progress before switching
+        val prevIndex = _currentChapterIndex.value
+        if (prevIndex != index) {
+            saveProgress()
+        }
 
         _currentChapterIndex.value = index
         val chapter = chaps[index]
@@ -75,6 +85,15 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         val sentences = TextChunker().splitSentences(chapter.content)
         _sentences.value = sentences
         ttsManager.loadSentences(sentences)
+
+        // Restore sentence position if this was a saved restore
+        if (restoredSentenceOffset > 0) {
+            _currentSentenceIndex.value = restoredSentenceOffset
+            ttsManager.seekToSentence(restoredSentenceOffset)
+            restoredSentenceOffset = 0 // only restore once
+        } else {
+            _currentSentenceIndex.value = 0
+        }
     }
 
     fun playPause() {

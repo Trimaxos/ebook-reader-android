@@ -15,6 +15,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -36,6 +37,7 @@ import java.io.File
 @Composable
 fun LibraryScreen(
     onBookClick: (Book) -> Unit,
+    onSettingsClick: () -> Unit,
     viewModel: LibraryViewModel = viewModel()
 ) {
     val books by viewModel.books.collectAsState()
@@ -52,6 +54,11 @@ fun LibraryScreen(
         topBar = {
             TopAppBar(
                 title = { Text("Thư viện sách") },
+                actions = {
+                    IconButton(onClick = onSettingsClick) {
+                        Icon(Icons.Default.Settings, contentDescription = "Cài đặt")
+                    }
+                },
                 colors = TopAppBarDefaults.topAppBarColors(
                     containerColor = MaterialTheme.colorScheme.primaryContainer
                 )

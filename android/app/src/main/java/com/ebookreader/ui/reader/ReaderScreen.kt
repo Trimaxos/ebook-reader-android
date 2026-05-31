@@ -85,8 +85,14 @@ fun ReaderScreen(
         bottomBar = {
             ReaderBottomBar(
                 ttsState = ttsState,
-                onPlayPause = { viewModel.playPause() },
-                onStop = { viewModel.stop() },
+                onPlayPause = {
+                    viewModel.playPause()
+                    if (ttsState != TtsState.PLAYING) viewModel.saveProgress()
+                },
+                onStop = {
+                    viewModel.stop()
+                    viewModel.saveProgress()
+                },
                 onPreviousChapter = {
                     if (currentChapterIndex > 0) viewModel.loadChapter(currentChapterIndex - 1)
                 },

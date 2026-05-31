@@ -40,6 +40,9 @@ fun NavGraph(
             LibraryScreen(
                 onBookClick = { book ->
                     navController.navigate(Routes.readerRoute(book))
+                },
+                onSettingsClick = {
+                    navController.navigate(Routes.SETTINGS)
                 }
             )
         }
