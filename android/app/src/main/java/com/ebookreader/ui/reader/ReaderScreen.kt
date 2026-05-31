@@ -48,16 +48,14 @@ fun ReaderScreen(
 
     // Auto-scroll: chỉ scroll khi câu đang đọc vượt quá item cuối trên màn hình
     LaunchedEffect(currentSentenceIndex) {
-        if (ttsState == TtsState.PLAYING) {
-            // Find display index for current flat sentence
-            val targetDisplayIdx = displayItems.indexOfFirst {
-                it is DisplayItem.Sentence && it.flatIndex == currentSentenceIndex
-            }
-            if (targetDisplayIdx >= 0) {
-                val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
-                if (lastVisible != null && targetDisplayIdx > lastVisible.index) {
-                    lazyListState.animateScrollToItem(targetDisplayIdx)
-                }
+        // Find display index for current flat sentence
+        val targetDisplayIdx = displayItems.indexOfFirst {
+            it is DisplayItem.Sentence && it.flatIndex == currentSentenceIndex
+        }
+        if (targetDisplayIdx >= 0) {
+            val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
+            if (lastVisible != null && targetDisplayIdx > lastVisible.index) {
+                lazyListState.animateScrollToItem(targetDisplayIdx)
             }
         }
     }
