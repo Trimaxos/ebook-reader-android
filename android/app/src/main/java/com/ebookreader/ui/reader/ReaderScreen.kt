@@ -306,7 +306,7 @@ fun ReaderSettingsDialog(
     onDismiss: () -> Unit,
     onServerUrlChange: (String) -> Unit
 ) {
-    var serverUrl by remember { mutableStateOf("http://221.132.21.49:8080") }
+    var serverUrl by remember { mutableStateOf("https://tts.ngtri.io.vn") }
 
     AlertDialog(
         onDismissRequest = onDismiss,

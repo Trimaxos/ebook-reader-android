@@ -11,7 +11,7 @@ import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
 class TtsClient(
-    private var serverUrl: String = "http://221.132.21.49:8080",
+    private var serverUrl: String = "https://tts.ngtri.io.vn",
     private var apiKey: String = "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
 ) {
 

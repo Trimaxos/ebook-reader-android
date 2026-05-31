@@ -61,7 +61,7 @@ fun SettingsScreen(
                 value = settings.ttsServerUrl,
                 onValueChange = { viewModel.updateTtsServerUrl(it) },
                 label = { Text("Server URL") },
-                placeholder = { Text("http://221.132.21.49:8080") },
+                placeholder = { Text("https://tts.ngtri.io.vn") },
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth(),
                 leadingIcon = {

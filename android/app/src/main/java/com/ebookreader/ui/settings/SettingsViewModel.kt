@@ -18,7 +18,7 @@ import kotlinx.coroutines.launch
 private val Application.dataStore: DataStore<Preferences> by preferencesDataStore(name = "settings")
 
 data class AppSettings(
-    val ttsServerUrl: String = "http://221.132.21.49:8080",
+    val ttsServerUrl: String = "https://tts.ngtri.io.vn",
     val ttsApiKey: String = "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
     val ttsVoice: String = "vi-VN-HoaiMyNeural",
     val ttsRate: String = "+0%",
@@ -59,7 +59,7 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
         viewModelScope.launch {
             dataStore.data.collect { prefs ->
                 _settings.value = AppSettings(
-                    ttsServerUrl = prefs[KEY_TTS_SERVER_URL] ?: "http://221.132.21.49:8080",
+                    ttsServerUrl = prefs[KEY_TTS_SERVER_URL] ?: "https://tts.ngtri.io.vn",
                     ttsApiKey = prefs[KEY_TTS_API_KEY] ?: "dCUHsBmDQJws88KGk_t1tl-fNGAORdOYdpkqPPNKGPI",
                     ttsVoice = prefs[KEY_TTS_VOICE] ?: "vi-VN-HoaiMyNeural",
                     ttsRate = prefs[KEY_TTS_RATE] ?: "+0%",
