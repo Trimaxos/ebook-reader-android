@@ -67,10 +67,9 @@ class TtsManager(
     fun play() {
         when (state) {
             TtsState.IDLE, TtsState.STOPPED -> {
-                currentSentenceIndex = 0
                 clearPrebuffer()
-                // Start playing first sentence immediately (small = fast TTS)
-                playSentence(0)
+                // Play from currentSentenceIndex (may have been set by seekToSentence)
+                playSentence(currentSentenceIndex)
                 // In parallel, pre-buffer sentences 1 through 5
                 fillPrebuffer()
             }

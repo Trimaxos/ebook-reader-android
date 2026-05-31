@@ -132,6 +132,18 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
+    /**
+     * Start playback from a specific sentence index (visible on screen).
+     * Used when user presses play — starts from first visible sentence, not chapter start.
+     */
+    fun startPlaybackFrom(sentenceIndex: Int) {
+        if (_ttsState.value == TtsState.IDLE || _ttsState.value == TtsState.STOPPED) {
+            ttsManager.seekToSentence(sentenceIndex)
+            _currentSentenceIndex.value = sentenceIndex
+            ttsManager.play()
+        }
+    }
+
     fun stop() {
         ttsManager.stop()
     }

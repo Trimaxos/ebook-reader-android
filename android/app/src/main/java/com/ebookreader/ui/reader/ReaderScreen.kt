@@ -2,11 +2,12 @@ package com.ebookreader.ui.reader
 
 import androidx.compose.animation.*
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -14,10 +15,7 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.text.*
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -45,6 +43,16 @@ fun ReaderScreen(
 
     var showSettings by remember { mutableStateOf(false) }
     var showChapterPicker by remember { mutableStateOf(false) }
+    val lazyListState = rememberLazyListState()
+    val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+
+    // Auto-scroll to current sentence during playback
+    LaunchedEffect(currentSentenceIndex) {
+        if (ttsState == TtsState.PLAYING && sentences.isNotEmpty()) {
+            // +1 because item 0 is the chapter title
+            lazyListState.animateScrollToItem(currentSentenceIndex + 1)
+        }
+    }
 
     LaunchedEffect(book.id) {
         viewModel.loadBook(book)
@@ -88,7 +96,13 @@ fun ReaderScreen(
             ReaderBottomBar(
                 ttsState = ttsState,
                 onPlayPause = {
-                    viewModel.playPause()
+                    if (ttsState == TtsState.IDLE || ttsState == TtsState.STOPPED) {
+                        // Start from first visible sentence on screen, not chapter start
+                        val startIdx = (lazyListState.firstVisibleItemIndex - 1).coerceAtLeast(0)
+                        viewModel.startPlaybackFrom(startIdx)
+                    } else {
+                        viewModel.playPause()
+                    }
                     if (ttsState != TtsState.PLAYING) viewModel.saveProgress()
                 },
                 onStop = {
@@ -111,46 +125,52 @@ fun ReaderScreen(
                 .fillMaxSize()
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.surface)
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onDragEnd = { /* handled by threshold below */ },
-                        onHorizontalDrag = { change, _ ->
-                            change.consume()
-                        }
-                    )
-                }
         ) {
             currentChapter?.let { chapter ->
-                Column(
+                LazyColumn(
+                    state = lazyListState,
                     modifier = Modifier
                         .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
                         .padding(horizontal = 20.dp, vertical = 16.dp)
                 ) {
-                    // Chapter title
-                    Text(
-                        text = chapter.title,
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                        modifier = Modifier.padding(bottom = 16.dp)
-                    )
-
-                    // Content with sentence highlighting
-                    if (sentences.isNotEmpty()) {
-                        BuildAnnotatedStringWithHighlight(
-                            sentences = sentences,
-                            currentIndex = currentSentenceIndex,
-                            isPlaying = ttsState == TtsState.PLAYING
-                        )
-                    } else {
+                    // Chapter title (item 0)
+                    item(key = "chapter_title") {
                         Text(
-                            text = chapter.content,
-                            style = ReadingTypography,
-                            color = MaterialTheme.colorScheme.onSurface
+                            text = chapter.title,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.padding(bottom = 16.dp)
                         )
                     }
 
-                    Spacer(Modifier.height(80.dp))
+                    // Sentences as individual items
+                    if (sentences.isNotEmpty()) {
+                        itemsIndexed(sentences) { index, sentence ->
+                            val isCurrentSentence = index == currentSentenceIndex && ttsState == TtsState.PLAYING
+                            Text(
+                                text = sentence.text,
+                                style = ReadingTypography.copy(
+                                    background = if (isCurrentSentence) highlightColor else Color.Transparent,
+                                    fontWeight = if (isCurrentSentence) FontWeight.Bold else FontWeight.Normal,
+                                    color = MaterialTheme.colorScheme.onSurface
+                                ),
+                                modifier = Modifier.padding(bottom = 8.dp)
+                            )
+                        }
+                    } else {
+                        item(key = "plain_text") {
+                            Text(
+                                text = chapter.content,
+                                style = ReadingTypography,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+
+                    // Bottom spacer so last sentence isn't hidden by bottom bar
+                    item(key = "bottom_spacer") {
+                        Spacer(Modifier.height(80.dp))
+                    }
                 }
             } ?: Box(
                 modifier = Modifier.fillMaxSize(),
@@ -231,41 +251,6 @@ fun ReaderScreen(
             onServerUrlChange = { url -> viewModel.updateTtsServerUrl(url) }
         )
     }
-}
-
-@Composable
-fun BuildAnnotatedStringWithHighlight(
-    sentences: List<com.ebookreader.tts.SentenceSpan>,
-    currentIndex: Int,
-    isPlaying: Boolean
-) {
-    val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-    val builder = AnnotatedString.Builder()
-
-    sentences.forEachIndexed { index, sentence ->
-        val start = builder.length
-        builder.append(sentence.text)
-        val end = builder.length
-
-        if (index == currentIndex && isPlaying) {
-            builder.addStyle(
-                SpanStyle(
-                    background = highlightColor,
-                    fontWeight = FontWeight.Bold
-                ),
-                start,
-                end
-            )
-        }
-
-        // Add space between sentences
-        builder.append(" ")
-    }
-
-    BasicText(
-        text = builder.toAnnotatedString(),
-        style = ReadingTypography.copy(color = MaterialTheme.colorScheme.onSurface)
-    )
 }
 
 @Composable
