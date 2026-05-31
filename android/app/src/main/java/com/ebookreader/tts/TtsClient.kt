@@ -10,7 +10,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.TimeUnit
 
-class TtsClient(private var serverUrl: String = "http://192.168.1.100:8765") {
+class TtsClient(private var serverUrl: String = "http://221.132.21.49:8765") {
 
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
