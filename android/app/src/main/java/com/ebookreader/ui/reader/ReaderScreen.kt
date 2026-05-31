@@ -37,7 +37,7 @@ fun ReaderScreen(
     val currentChapter by viewModel.currentChapter.collectAsState()
     val currentChapterIndex by viewModel.currentChapterIndex.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
-    val sentences by viewModel.sentences.collectAsState()
+    val displayItems by viewModel.displayItems.collectAsState()
     val currentSentenceIndex by viewModel.currentSentenceIndex.collectAsState()
     val ttsState by viewModel.ttsState.collectAsState()
 
@@ -48,11 +48,16 @@ fun ReaderScreen(
 
     // Auto-scroll: chỉ scroll khi câu đang đọc vượt quá item cuối trên màn hình
     LaunchedEffect(currentSentenceIndex) {
-        if (ttsState == TtsState.PLAYING && sentences.isNotEmpty()) {
-            val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
-            val targetIndex = currentSentenceIndex + 1 // +1 vì item 0 = chapter title
-            if (lastVisible != null && targetIndex > lastVisible.index) {
-                lazyListState.animateScrollToItem(targetIndex)
+        if (ttsState == TtsState.PLAYING) {
+            // Find display index for current flat sentence
+            val targetDisplayIdx = displayItems.indexOfFirst {
+                it is DisplayItem.Sentence && it.flatIndex == currentSentenceIndex
+            }
+            if (targetDisplayIdx >= 0) {
+                val lastVisible = lazyListState.layoutInfo.visibleItemsInfo.lastOrNull()
+                if (lastVisible != null && targetDisplayIdx > lastVisible.index) {
+                    lazyListState.animateScrollToItem(targetDisplayIdx)
+                }
             }
         }
     }
@@ -71,6 +76,13 @@ fun ReaderScreen(
                             style = MaterialTheme.typography.titleSmall,
                             maxLines = 1
                         )
+                        if (chapters.size > 1) {
+                            Text(
+                                text = "Chương ${currentChapterIndex + 1}/${chapters.size}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
                 },
                 navigationIcon = {
@@ -100,9 +112,14 @@ fun ReaderScreen(
                 ttsState = ttsState,
                 onPlayPause = {
                     if (ttsState == TtsState.IDLE || ttsState == TtsState.STOPPED) {
-                        // Start from first visible sentence on screen, not chapter start
-                        val startIdx = (lazyListState.firstVisibleItemIndex - 1).coerceAtLeast(0)
-                        viewModel.startPlaybackFrom(startIdx)
+                        // Tìm câu đầu tiên visible trên màn hình
+                        val firstVisibleDisplayIdx = lazyListState.firstVisibleItemIndex
+                        val flatIdx = findFlatIndexAtDisplayIndex(displayItems, firstVisibleDisplayIdx)
+                        if (flatIdx >= 0) {
+                            viewModel.startPlaybackFrom(flatIdx)
+                        } else {
+                            viewModel.playPause()
+                        }
                     } else {
                         viewModel.playPause()
                     }
@@ -113,10 +130,10 @@ fun ReaderScreen(
                     viewModel.saveProgress()
                 },
                 onPreviousChapter = {
-                    if (currentChapterIndex > 0) viewModel.loadChapter(currentChapterIndex - 1)
+                    if (currentChapterIndex > 0) viewModel.navigateToChapter(currentChapterIndex - 1)
                 },
                 onNextChapter = {
-                    if (currentChapterIndex < chapters.size - 1) viewModel.loadChapter(currentChapterIndex + 1)
+                    if (currentChapterIndex < chapters.size - 1) viewModel.navigateToChapter(currentChapterIndex + 1)
                 },
                 hasPrevious = currentChapterIndex > 0,
                 hasNext = currentChapterIndex < chapters.size - 1
@@ -129,44 +146,55 @@ fun ReaderScreen(
                 .padding(padding)
                 .background(MaterialTheme.colorScheme.surface)
         ) {
-            currentChapter?.let { chapter ->
+            if (displayItems.isNotEmpty()) {
                 LazyColumn(
                     state = lazyListState,
                     modifier = Modifier
                         .fillMaxSize()
                         .padding(horizontal = 20.dp, vertical = 16.dp)
                 ) {
-                    // Chapter title (item 0)
-                    item(key = "chapter_title") {
-                        Text(
-                            text = chapter.title,
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(bottom = 16.dp)
-                        )
-                    }
-
-                    // Sentences as individual items
-                    if (sentences.isNotEmpty()) {
-                        itemsIndexed(sentences) { index, sentence ->
-                            val isCurrentSentence = index == currentSentenceIndex && ttsState == TtsState.PLAYING
-                            Text(
-                                text = sentence.text,
-                                style = ReadingTypography.copy(
-                                    background = if (isCurrentSentence) highlightColor else Color.Transparent,
-                                    fontWeight = if (isCurrentSentence) FontWeight.Bold else FontWeight.Normal,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                ),
-                                modifier = Modifier.padding(bottom = 8.dp)
-                            )
+                    itemsIndexed(
+                        items = displayItems,
+                        key = { _, item ->
+                            when (item) {
+                                is DisplayItem.Header -> "hdr_${item.chapterIndex}"
+                                is DisplayItem.Sentence -> "sent_${item.flatIndex}"
+                            }
                         }
-                    } else {
-                        item(key = "plain_text") {
-                            Text(
-                                text = chapter.content,
-                                style = ReadingTypography,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
+                    ) { _, item ->
+                        when (item) {
+                            is DisplayItem.Header -> {
+                                // Chapter header with visual separator
+                                if (item.chapterIndex > 0) {
+                                    HorizontalDivider(
+                                        modifier = Modifier.padding(vertical = 12.dp),
+                                        color = MaterialTheme.colorScheme.outlineVariant
+                                    )
+                                }
+                                Text(
+                                    text = item.title,
+                                    style = MaterialTheme.typography.titleLarge,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(
+                                        top = if (item.chapterIndex > 0) 8.dp else 0.dp,
+                                        bottom = 12.dp
+                                    )
+                                )
+                            }
+                            is DisplayItem.Sentence -> {
+                                val isCurrent = item.flatIndex == currentSentenceIndex
+                                        && ttsState == TtsState.PLAYING
+                                Text(
+                                    text = item.span.text,
+                                    style = ReadingTypography.copy(
+                                        background = if (isCurrent) highlightColor else Color.Transparent,
+                                        fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    ),
+                                    modifier = Modifier.padding(bottom = 8.dp)
+                                )
+                            }
                         }
                     }
 
@@ -175,11 +203,13 @@ fun ReaderScreen(
                         Spacer(Modifier.height(80.dp))
                     }
                 }
-            } ?: Box(
-                modifier = Modifier.fillMaxSize(),
-                contentAlignment = Alignment.Center
-            ) {
-                CircularProgressIndicator()
+            } else {
+                Box(
+                    modifier = Modifier.fillMaxSize(),
+                    contentAlignment = Alignment.Center
+                ) {
+                    CircularProgressIndicator()
+                }
             }
         }
     }
@@ -197,7 +227,6 @@ fun ReaderScreen(
                 shape = RoundedCornerShape(16.dp)
             ) {
                 Column(modifier = Modifier.fillMaxSize()) {
-                    // Title bar
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -215,8 +244,6 @@ fun ReaderScreen(
                         }
                     }
                     HorizontalDivider()
-
-                    // Scrollable chapter list
                     Column(
                         modifier = Modifier
                             .fillMaxSize()
@@ -226,7 +253,7 @@ fun ReaderScreen(
                         chapters.forEachIndexed { index, chapter ->
                             TextButton(
                                 onClick = {
-                                    viewModel.loadChapter(index)
+                                    viewModel.navigateToChapter(index)
                                     showChapterPicker = false
                                 },
                                 modifier = Modifier.fillMaxWidth()
@@ -256,6 +283,25 @@ fun ReaderScreen(
     }
 }
 
+/**
+ * Find the flat sentence index from a display (LazyColumn) index.
+ */
+private fun findFlatIndexAtDisplayIndex(
+    displayItems: List<DisplayItem>,
+    displayIdx: Int
+): Int {
+    for (i in displayIdx until displayItems.size) {
+        val item = displayItems[i]
+        if (item is DisplayItem.Sentence) return item.flatIndex
+    }
+    // Fallback: find previous sentence
+    for (i in displayIdx downTo 0) {
+        val item = displayItems[i]
+        if (item is DisplayItem.Sentence) return item.flatIndex
+    }
+    return 0
+}
+
 @Composable
 fun ReaderBottomBar(
     ttsState: TtsState,
@@ -277,7 +323,6 @@ fun ReaderBottomBar(
             horizontalArrangement = Arrangement.SpaceEvenly,
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Previous chapter
             IconButton(
                 onClick = onPreviousChapter,
                 enabled = hasPrevious
@@ -285,7 +330,6 @@ fun ReaderBottomBar(
                 Icon(Icons.Default.SkipPrevious, contentDescription = "Chương trước")
             }
 
-            // Play/Pause
             FilledIconButton(
                 onClick = onPlayPause,
                 modifier = Modifier.size(56.dp)
@@ -300,7 +344,6 @@ fun ReaderBottomBar(
                 )
             }
 
-            // Stop
             IconButton(
                 onClick = onStop,
                 enabled = ttsState != TtsState.IDLE && ttsState != TtsState.STOPPED
@@ -308,7 +351,6 @@ fun ReaderBottomBar(
                 Icon(Icons.Default.Stop, contentDescription = "Dừng")
             }
 
-            // Next chapter
             IconButton(
                 onClick = onNextChapter,
                 enabled = hasNext
