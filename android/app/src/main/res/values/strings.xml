@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">Ebook Reader</string>
+    <string name="library_title">Thư viện sách</string>
+    <string name="settings_title">Cài đặt</string>
+    <string name="reader_title">Đọc sách</string>
+    <string name="import_book">Nhập sách</string>
+    <string name="delete_book">Xóa sách</string>
+    <string name="no_books">Chưa có sách nào. Nhấn + để nhập sách.</string>
+    <string name="tts_play">Phát</string>
+    <string name="tts_pause">Tạm dừng</string>
+    <string name="tts_stop">Dừng</string>
+    <string name="server_url">Địa chỉ máy chủ TTS</string>
+    <string name="voice_selection">Giọng đọc</string>
+    <string name="reading_speed">Tốc độ đọc</string>
+    <string name="night_mode">Chế độ tối</string>
+    <string name="font_size">Cỡ chữ</string>
+</resources>

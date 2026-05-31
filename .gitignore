@@ -12,3 +12,15 @@ __pycache__/
 *.pyc
 venv/
 .env
+
+# Android
+android/.gradle/
+android/app/build/
+android/build/
+android/local.properties
+android/gradle/wrapper/gradle-wrapper.jar
+android/gradlew
+android/gradlew.bat
+
+# Python
+edge-tts-server/venv/
