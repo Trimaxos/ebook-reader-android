@@ -9,8 +9,8 @@ data class SentenceSpan(
 class TextChunker {
 
     companion object {
-        private const val MAX_CHUNK_LENGTH = 2000
-        private const val MERGE_THRESHOLD = 30
+        private const val MAX_CHUNK_LENGTH = 3000
+        private const val MERGE_THRESHOLD = 50
     }
 
     fun splitSentences(text: String): List<SentenceSpan> {

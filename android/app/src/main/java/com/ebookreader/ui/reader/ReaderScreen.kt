@@ -22,6 +22,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.ebookreader.data.model.Book
 import com.ebookreader.tts.TtsState
@@ -161,41 +163,65 @@ fun ReaderScreen(
 
     // Chapter picker dialog
     if (showChapterPicker) {
-        AlertDialog(
+        Dialog(
             onDismissRequest = { showChapterPicker = false },
-            title = { Text("Chọn chương") },
-            text = {
-                Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState())
-                        .heightIn(max = 400.dp)
-                ) {
-                    chapters.forEachIndexed { index, chapter ->
-                        TextButton(
-                            onClick = {
-                                viewModel.loadChapter(index)
-                                showChapterPicker = false
-                            },
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Text(
-                                text = chapter.title,
-                                fontWeight = if (index == currentChapterIndex) FontWeight.Bold else FontWeight.Normal,
-                                color = if (index == currentChapterIndex)
-                                    MaterialTheme.colorScheme.primary
-                                else
-                                    MaterialTheme.colorScheme.onSurface
-                            )
+            properties = DialogProperties(usePlatformDefaultWidth = false)
+        ) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth(0.9f)
+                    .fillMaxHeight(0.75f),
+                shape = RoundedCornerShape(16.dp)
+            ) {
+                Column(modifier = Modifier.fillMaxSize()) {
+                    // Title bar
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Chọn chương",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        TextButton(onClick = { showChapterPicker = false }) {
+                            Text("Đóng")
+                        }
+                    }
+                    HorizontalDivider()
+
+                    // Scrollable chapter list
+                    Column(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 8.dp)
+                    ) {
+                        chapters.forEachIndexed { index, chapter ->
+                            TextButton(
+                                onClick = {
+                                    viewModel.loadChapter(index)
+                                    showChapterPicker = false
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = chapter.title,
+                                    fontWeight = if (index == currentChapterIndex) FontWeight.Bold else FontWeight.Normal,
+                                    color = if (index == currentChapterIndex)
+                                        MaterialTheme.colorScheme.primary
+                                    else
+                                        MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
                 }
-            },
-            confirmButton = {
-                TextButton(onClick = { showChapterPicker = false }) {
-                    Text("Đóng")
-                }
             }
-        )
+        }
     }
 
     // Settings dialog
