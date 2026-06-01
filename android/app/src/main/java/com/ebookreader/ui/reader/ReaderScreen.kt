@@ -34,8 +34,6 @@ fun ReaderScreen(
     onBackClick: () -> Unit,
     viewModel: ReaderViewModel = viewModel()
 ) {
-    val currentChapter by viewModel.currentChapter.collectAsState()
-    val currentChapterIndex by viewModel.currentChapterIndex.collectAsState()
     val chapters by viewModel.chapters.collectAsState()
     val displayItems by viewModel.displayItems.collectAsState()
     val currentSentenceIndex by viewModel.currentSentenceIndex.collectAsState()
@@ -45,6 +43,27 @@ fun ReaderScreen(
     var showChapterPicker by remember { mutableStateOf(false) }
     val lazyListState = rememberLazyListState()
     val highlightColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+
+    // Derive current chapter DIRECTLY from displayItems + flat index (always correct)
+    val (currentChapter, currentChapterIndex) = remember(displayItems, currentSentenceIndex, chapters) {
+        val displayItem = displayItems.find {
+            it is DisplayItem.Sentence && it.flatIndex == currentSentenceIndex
+        } as? DisplayItem.Sentence
+        if (displayItem != null && displayItem.chapterIndex in chapters.indices) {
+            Pair(chapters[displayItem.chapterIndex], displayItem.chapterIndex)
+        } else if (chapters.isNotEmpty()) {
+            Pair(chapters[0], 0)
+        } else {
+            Pair(null, 0)
+        }
+    }
+
+    // Auto-save progress when leaving the screen
+    DisposableEffect(Unit) {
+        onDispose {
+            viewModel.saveProgress()
+        }
+    }
 
     // Auto-scroll: chỉ scroll khi câu đang đọc vượt quá item cuối trên màn hình
     LaunchedEffect(currentSentenceIndex) {

@@ -10,6 +10,20 @@ import java.io.InputStreamReader
 
 class EpubParser {
 
+    companion object {
+        // Compiled regexes - reuse instead of creating per call
+        private val styleTagRegex = Regex("<style[^>]*>.*?</style>", RegexOption.DOT_MATCHES_ALL)
+        private val scriptTagRegex = Regex("<script[^>]*>.*?</script>", RegexOption.DOT_MATCHES_ALL)
+        private val htmlTagRegex = Regex("<[^>]*>")
+        private val nbspRegex = Regex("&nbsp;")
+        private val ampRegex = Regex("&amp;")
+        private val ltRegex = Regex("&lt;")
+        private val gtRegex = Regex("&gt;")
+        private val quotRegex = Regex("&quot;")
+        private val htmlEntityRegex = Regex("&#\\d+;")
+        private val multiNewlineRegex = Regex("\\n{3,}")
+    }
+
     fun parse(context: Context, filePath: String): Pair<List<Chapter>, BookMetadata> {
         val inputStream = FileInputStream(filePath)
         val book = EpubReader().readEpub(inputStream)
@@ -42,7 +56,7 @@ class EpubParser {
 
         val chapters = mutableListOf<Chapter>()
 
-        // Get TOC references as a plain List
+        // Get TOC references
         val tocRefs: List<nl.siegmann.epublib.domain.TOCReference> = try {
             book.tableOfContents.tocReferences
         } catch (e: Exception) {
@@ -63,7 +77,7 @@ class EpubParser {
             }
         }
 
-        // Fallback: if no TOC chapters found with content, read all book resources
+        // Fallback: no TOC content → read all resources
         if (chapters.isEmpty()) {
             var chapterIdx = 0
             val allResources = book.resources.getAll()
@@ -116,19 +130,19 @@ class EpubParser {
 
     private fun stripHtml(html: String): String {
         return html
-            .replace(Regex("<style[^>]*>.*?</style>", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("<script[^>]*>.*?</script>", RegexOption.DOT_MATCHES_ALL), "")
-            .replace(Regex("<[^>]*>"), "")
-            .replace(Regex("&nbsp;"), " ")
-            .replace(Regex("&amp;"), "&")
-            .replace(Regex("&lt;"), "<")
-            .replace(Regex("&gt;"), ">")
-            .replace(Regex("&quot;"), "\"")
-            .replace(Regex("&#\\d+;")) { matchResult ->
+            .replace(styleTagRegex, "")
+            .replace(scriptTagRegex, "")
+            .replace(htmlTagRegex, "")
+            .replace(nbspRegex, " ")
+            .replace(ampRegex, "&")
+            .replace(ltRegex, "<")
+            .replace(gtRegex, ">")
+            .replace(quotRegex, "\"")
+            .replace(htmlEntityRegex) { matchResult ->
                 val code = matchResult.value.drop(2).dropLast(1).toIntOrNull()
                 if (code != null) code.toChar().toString() else matchResult.value
             }
-            .replace(Regex("\n{3,}"), "\n\n")
+            .replace(multiNewlineRegex, "\n\n")
             .trim()
     }
 }

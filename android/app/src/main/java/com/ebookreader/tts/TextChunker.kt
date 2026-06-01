@@ -11,12 +11,14 @@ class TextChunker {
     companion object {
         private const val MAX_CHUNK_LENGTH = 3000
         private const val MERGE_THRESHOLD = 30
+        private val sentenceSplitRegex = Regex(
+            "(?<=[.!?])\\s+|(?<=[.!?])(?=\\n)|(?<=\\n)\\s*"
+        )
     }
 
     fun splitSentences(text: String): List<SentenceSpan> {
         val sentences = mutableListOf<SentenceSpan>()
-        val regex = Regex("(?<=[.!?])\\s+|(?<=[.!?])(?=\\n)|(?<=\\n)\\s*")
-        val parts = text.split(regex)
+        val parts = text.split(sentenceSplitRegex)
         var offset = 0
 
         for (part in parts) {
