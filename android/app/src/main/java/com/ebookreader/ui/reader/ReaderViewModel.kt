@@ -16,67 +16,76 @@ import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-// Shared DataStore instance (same key as SettingsViewModel)
 private val Application.readerDataStore by preferencesDataStore(name = "settings")
 
 class ReaderViewModel(application: Application) : AndroidViewModel(application) {
 
     private val db = AppDatabase.getInstance(application)
     private val parser = EpubParser()
-    private val bookCache = BookCache(application)
     private val dataStore = application.readerDataStore
 
     val ttsClient = TtsClient()
     val ttsPlayer = TtsPlayer(application)
     val ttsManager = TtsManager(application, ttsClient, ttsPlayer)
 
-    // Chapters metadata
+    // ── Chapter metadata (always available, no content) ──
     private val _chapters = MutableStateFlow<List<Chapter>>(emptyList())
     val chapters: StateFlow<List<Chapter>> = _chapters.asStateFlow()
 
-    // Display items: chapter headers + sentences (flat, multi-chapter)
+    // ── Lazy-loaded sentence cache ──
+    private val sentenceCache = mutableMapOf<Int, List<SentenceSpan>>()
+
+    // ── Display items (only loaded chapters) ──
     private val _displayItems = MutableStateFlow<List<DisplayItem>>(emptyList())
     val displayItems: StateFlow<List<DisplayItem>> = _displayItems.asStateFlow()
 
-    // Sentence count per chapter (for flat index ↔ chapter mapping)
-    private var sentenceCountsPerChapter: List<Int> = emptyList()
+    // ── Sentence count per loaded chapter ──
+    private var sentenceCountsPerChapter = mutableListOf<Int>()
 
-    // Current position (flat index across all chapters)
-    private val _currentSentenceIndex = MutableStateFlow(0)
-    val currentSentenceIndex: StateFlow<Int> = _currentSentenceIndex.asStateFlow()
-
-    // Current chapter (derived from flat index)
+    // ── Current position ──
     private val _currentChapterIndex = MutableStateFlow(0)
     val currentChapterIndex: StateFlow<Int> = _currentChapterIndex.asStateFlow()
 
-    private val _currentChapter = MutableStateFlow<Chapter?>(null)
-    val currentChapter: StateFlow<Chapter?> = _currentChapter.asStateFlow()
+    private val _currentSentenceInChapter = MutableStateFlow(0)
+    val currentSentenceInChapter: StateFlow<Int> = _currentSentenceInChapter.asStateFlow()
+
+    /** Flat index for TTS (derived: sum of prev chapter counts + offset) */
+    private val _currentSentenceIndex = MutableStateFlow(0)
+    val currentSentenceIndex: StateFlow<Int> = _currentSentenceIndex.asStateFlow()
+    private var currentFlatIndex: Int = 0
 
     private val _ttsState = MutableStateFlow(TtsState.IDLE)
     val ttsState: StateFlow<TtsState> = _ttsState.asStateFlow()
 
-    // All sentence spans (flat, for TTS)
-    private val _allSentenceSpans = MutableStateFlow<List<SentenceSpan>>(emptyList())
-    val sentences: StateFlow<List<SentenceSpan>> = _allSentenceSpans.asStateFlow()
+    private val _currentChapter = MutableStateFlow<Chapter?>(null)
+    val currentChapter: StateFlow<Chapter?> = _currentChapter.asStateFlow()
 
     private var book: Book? = null
+    private var rawChapters: List<Chapter> = emptyList()
 
     companion object {
         private val KEY_TTS_VOICE = stringPreferencesKey("tts_voice")
         private val KEY_TTS_RATE = stringPreferencesKey("tts_rate")
+        private const val LOOKAHEAD_CHAPTERS = 2 // Number of chapters to pre-load ahead
     }
 
     init {
-        ttsManager.onStateChanged = { state ->
-            _ttsState.value = state
-        }
+        ttsManager.onStateChanged = { state -> _ttsState.value = state }
         ttsManager.onSentenceChanged = { flatIndex, _ ->
+            currentFlatIndex = flatIndex
             _currentSentenceIndex.value = flatIndex
-            // Update current chapter based on flat index
-            updateCurrentChapter(flatIndex)
+            val (chIdx, offset) = flatIndexToChapterAndOffset(flatIndex)
+            _currentChapterIndex.value = chIdx
+            _currentSentenceInChapter.value = offset
+            if (chIdx in rawChapters.indices) _currentChapter.value = rawChapters[chIdx]
+
+            // Auto-load next chapter when nearing end
+            val chCount = sentenceCountsPerChapter.getOrElse(chIdx) { 0 }
+            if (offset >= chCount - 3) { // 3 sentences before end of chapter
+                ensureChaptersLoaded(chIdx + 1)
+            }
         }
 
-        // Load voice/rate from settings and apply
         viewModelScope.launch {
             dataStore.data.collect { prefs ->
                 val voice = prefs[KEY_TTS_VOICE] ?: "vi-VN-HoaiMyNeural"
@@ -92,107 +101,86 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _currentChapter.value = null
 
-            // Parse EPUB + split sentences
+            // Parse EPUB (fast: strip HTML only, no sentence splitting)
             val (chapters, _) = withContext(Dispatchers.IO) {
                 parser.parse(getApplication(), book.filePath)
             }
             if (chapters.isEmpty()) return@launch
+            rawChapters = chapters
             _chapters.value = chapters
 
-            // Build flat display list from ALL chapters
-            val allSpans = mutableListOf<SentenceSpan>()
-            val displayItems = mutableListOf<DisplayItem>()
-            val counts = mutableListOf<Int>()
-            val chunker = TextChunker()
-
-            for ((chIdx, ch) in chapters.withIndex()) {
-                displayItems.add(DisplayItem.Header(chIdx, ch.title))
-                val chSents = chunker.splitSentences(ch.content)
-                counts.add(chSents.size)
-                for (s in chSents) {
-                    val flatIdx = allSpans.size
-                    allSpans.add(s)
-                    displayItems.add(
-                        DisplayItem.Sentence(flatIndex = flatIdx, chapterIndex = chIdx, span = s)
-                    )
-                }
-            }
-
-            sentenceCountsPerChapter = counts
-            _allSentenceSpans.value = allSpans
-            _displayItems.value = displayItems
-
-            // Save to cache for next time (best-effort, không crash nếu lỗi)
-            try {
-                withContext(Dispatchers.IO) {
-                    bookCache.put(book.id, book.filePath, BookCache.CachedBook(
-                        chapters = chapters,
-                        displayItems = displayItems,
-                        sentenceCountsPerChapter = counts,
-                        allSentenceSpans = allSpans
-                    ))
-                }
-            } catch (_: Exception) { }
-
-            // Restore progress (inline, không launch riêng)
+            // Restore progress
             val progress = withContext(Dispatchers.IO) {
                 db.readingProgressDao().getProgress(book.id)
             }
             val startChapter = progress?.chapterIndex ?: book.lastReadChapter
             val sentenceOffset = progress?.charOffset ?: 0
 
-            val flatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
-            _currentSentenceIndex.value = flatIndex
-            updateCurrentChapter(flatIndex)
-
-            ttsManager.loadSentences(allSpans)
-            ttsManager.seekToSentence(flatIndex)
+            // Load current chapter + lookahead
+            ensureChaptersLoaded(startChapter)
+            _currentChapterIndex.value = startChapter
+            _currentSentenceInChapter.value = sentenceOffset
+            if (startChapter in chapters.indices) _currentChapter.value = chapters[startChapter]
+            currentFlatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
+            _currentSentenceIndex.value = currentFlatIndex
+            ttsManager.seekToSentence(currentFlatIndex)
         }
     }
 
     /**
-     * Apply cached book data (load from cache, skip parsing).
+     * Ensure specified chapter + lookahead chapters are loaded (sentences split + cached).
      */
-    private fun applyCachedData(book: Book, cached: BookCache.CachedBook) {
-        _chapters.value = cached.chapters
-        sentenceCountsPerChapter = cached.sentenceCountsPerChapter
-        _allSentenceSpans.value = cached.allSentenceSpans
-        _displayItems.value = cached.displayItems
-        restoreProgress(book)
-    }
-
-    /**
-     * Restore reading progress after display items are ready.
-     */
-    private fun restoreProgress(book: Book) {
-        viewModelScope.launch {
-            val progress = withContext(Dispatchers.IO) {
-                db.readingProgressDao().getProgress(book.id)
+    private fun ensureChaptersLoaded(chapterIndex: Int) {
+        val endIdx = (chapterIndex + LOOKAHEAD_CHAPTERS)
+            .coerceAtMost(rawChapters.size - 1)
+        for (i in chapterIndex..endIdx) {
+            if (i !in sentenceCache) {
+                val chunker = TextChunker()
+                val sents = chunker.splitSentences(rawChapters[i].content)
+                sentenceCache[i] = sents
             }
-            val startChapter = progress?.chapterIndex ?: book.lastReadChapter
-            val sentenceOffset = progress?.charOffset ?: 0
-
-            val flatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
-            _currentSentenceIndex.value = flatIndex
-            updateCurrentChapter(flatIndex)
-
-            ttsManager.loadSentences(_allSentenceSpans.value)
-            ttsManager.seekToSentence(flatIndex)
         }
+        rebuildDisplay()
     }
 
     /**
-     * Navigate to a chapter (scroll to its first sentence).
-     * No reload needed — all chapters are already flat-loaded.
+     * Rebuild display items + TTS sentences from cached chapters.
      */
+    private fun rebuildDisplay() {
+        val items = mutableListOf<DisplayItem>()
+        val allSpans = mutableListOf<SentenceSpan>()
+        val counts = mutableListOf<Int>()
+        var flatIdx = 0
+
+        val sortedChs = sentenceCache.keys.sorted()
+        for (chIdx in sortedChs) {
+            if (chIdx !in rawChapters.indices) continue
+            items.add(DisplayItem.Header(chIdx, rawChapters[chIdx].title))
+            val sents = sentenceCache[chIdx]!!
+            counts.add(sents.size)
+            for (s in sents) {
+                items.add(DisplayItem.Sentence(flatIndex = flatIdx, chapterIndex = chIdx, span = s))
+                allSpans.add(s)
+                flatIdx++
+            }
+        }
+
+        sentenceCountsPerChapter = counts
+        _displayItems.value = items
+        ttsManager.loadSentences(allSpans)
+    }
+
+    /** Load and navigate to a chapter. */
     fun navigateToChapter(chapterIndex: Int) {
-        val chaps = _chapters.value
-        if (chapterIndex < 0 || chapterIndex >= chaps.size) return
+        if (chapterIndex < 0 || chapterIndex >= rawChapters.size) return
         saveProgress()
-        val flatIndex = chapterAndOffsetToFlatIndex(chapterIndex, 0)
-        _currentSentenceIndex.value = flatIndex
-        updateCurrentChapter(flatIndex)
-        ttsManager.seekToSentence(flatIndex)
+        ensureChaptersLoaded(chapterIndex)
+        _currentChapterIndex.value = chapterIndex
+        _currentSentenceInChapter.value = 0
+        if (chapterIndex in rawChapters.indices) _currentChapter.value = rawChapters[chapterIndex]
+        currentFlatIndex = chapterAndOffsetToFlatIndex(chapterIndex, 0)
+        _currentSentenceIndex.value = currentFlatIndex
+        ttsManager.seekToSentence(currentFlatIndex)
     }
 
     fun playPause() {
@@ -204,65 +192,38 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         }
     }
 
-    /**
-     * Start playback from a specific flat sentence index (visible on screen).
-     */
     fun startPlaybackFrom(flatIndex: Int) {
         if (_ttsState.value == TtsState.IDLE || _ttsState.value == TtsState.STOPPED) {
-            ttsManager.seekToSentence(flatIndex)
+            currentFlatIndex = flatIndex
             _currentSentenceIndex.value = flatIndex
-            updateCurrentChapter(flatIndex)
+            ttsManager.seekToSentence(flatIndex)
             ttsManager.play()
         }
     }
 
-    fun stop() {
-        ttsManager.stop()
-    }
+    fun stop() { ttsManager.stop() }
 
     fun saveProgress() {
         book?.let { b ->
-            val flatIdx = _currentSentenceIndex.value
-            val (chIdx, offset) = flatIndexToChapterAndOffset(flatIdx)
+            val (chIdx, offset) = flatIndexToChapterAndOffset(currentFlatIndex)
             viewModelScope.launch {
                 db.readingProgressDao().upsert(
-                    ReadingProgress(
-                        bookId = b.id,
-                        chapterIndex = chIdx,
-                        charOffset = offset
-                    )
+                    ReadingProgress(bookId = b.id, chapterIndex = chIdx, charOffset = offset)
                 )
             }
         }
     }
 
-    fun updateTtsServerUrl(url: String) {
-        ttsClient.updateServerUrl(url)
-    }
-
-    fun updateVoice(voice: String) {
-        ttsManager.setVoice(voice)
-    }
-
-    fun updateRate(rate: String) {
-        ttsManager.setRate(rate)
-    }
+    fun updateTtsServerUrl(url: String) { ttsClient.updateServerUrl(url) }
+    fun updateVoice(voice: String) { ttsManager.setVoice(voice) }
+    fun updateRate(rate: String) { ttsManager.setRate(rate) }
 
     override fun onCleared() {
         super.onCleared()
         ttsManager.cleanup()
     }
 
-    // ── Private helpers ──
-
-    private fun updateCurrentChapter(flatIndex: Int) {
-        val (chIdx, _) = flatIndexToChapterAndOffset(flatIndex)
-        _currentChapterIndex.value = chIdx
-        val chaps = _chapters.value
-        if (chIdx in chaps.indices) {
-            _currentChapter.value = chaps[chIdx]
-        }
-    }
+    // ── Helpers ──
 
     private fun chapterAndOffsetToFlatIndex(chapterIndex: Int, offset: Int): Int {
         var result = 0
@@ -279,8 +240,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             if (remaining < count) return Pair(chIdx, remaining)
             remaining -= count
         }
-        // Fallback: last chapter
-        val lastIdx = sentenceCountsPerChapter.size - 1
+        val lastIdx = (sentenceCountsPerChapter.size - 1).coerceAtLeast(0)
         return Pair(lastIdx, sentenceCountsPerChapter.getOrElse(lastIdx) { 0 })
     }
 }
