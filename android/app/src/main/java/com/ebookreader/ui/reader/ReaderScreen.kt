@@ -129,7 +129,7 @@ fun ReaderScreen(
                 ttsState = ttsState,
                 onPlayPause = {
                     if (ttsState == TtsState.IDLE || ttsState == TtsState.STOPPED) {
-                        // Tìm câu đầu tiên visible trên màn hình
+                        // Phát từ vị trí đang hiển thị trên màn hình
                         val firstVisibleDisplayIdx = lazyListState.firstVisibleItemIndex
                         val flatIdx = findFlatIndexAtDisplayIndex(displayItems, firstVisibleDisplayIdx)
                         if (flatIdx >= 0) {
@@ -140,11 +140,6 @@ fun ReaderScreen(
                     } else {
                         viewModel.playPause()
                     }
-                    if (ttsState != TtsState.PLAYING) viewModel.saveProgress()
-                },
-                onStop = {
-                    viewModel.stop()
-                    viewModel.saveProgress()
                 },
                 onPreviousChapter = {
                     if (currentChapterIndex > 0) viewModel.navigateToChapter(currentChapterIndex - 1)
@@ -323,7 +318,6 @@ private fun findFlatIndexAtDisplayIndex(
 fun ReaderBottomBar(
     ttsState: TtsState,
     onPlayPause: () -> Unit,
-    onStop: () -> Unit,
     onPreviousChapter: () -> Unit,
     onNextChapter: () -> Unit,
     hasPrevious: Boolean,
@@ -347,25 +341,36 @@ fun ReaderBottomBar(
                 Icon(Icons.Default.SkipPrevious, contentDescription = "Chương trước")
             }
 
-            FilledIconButton(
-                onClick = onPlayPause,
-                modifier = Modifier.size(56.dp)
-            ) {
-                Icon(
-                    imageVector = when (ttsState) {
-                        TtsState.PLAYING -> Icons.Default.Pause
-                        else -> Icons.Default.PlayArrow
-                    },
-                    contentDescription = if (ttsState == TtsState.PLAYING) "Tạm dừng" else "Phát",
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-
-            IconButton(
-                onClick = onStop,
-                enabled = ttsState != TtsState.IDLE && ttsState != TtsState.STOPPED
-            ) {
-                Icon(Icons.Default.Stop, contentDescription = "Dừng")
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                FilledIconButton(
+                    onClick = onPlayPause,
+                    modifier = Modifier.size(56.dp)
+                ) {
+                    Icon(
+                        imageVector = when (ttsState) {
+                            TtsState.PLAYING -> Icons.Default.Pause
+                            else -> Icons.Default.PlayArrow
+                        },
+                        contentDescription = if (ttsState == TtsState.PLAYING) "Tạm dừng" else "Phát",
+                        modifier = Modifier.size(32.dp)
+                    )
+                }
+                // State label
+                if (ttsState == TtsState.PLAYING) {
+                    Text(
+                        text = "Đang đọc...",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                } else if (ttsState == TtsState.PAUSED) {
+                    Text(
+                        text = "Đã dừng",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(top = 4.dp)
+                    )
+                }
             }
 
             IconButton(
