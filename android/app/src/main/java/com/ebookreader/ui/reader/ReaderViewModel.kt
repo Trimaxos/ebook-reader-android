@@ -128,20 +128,28 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     }
 
     /**
-     * Ensure chapters around the given index are loaded.
-     * Loads ±2 chapters (current, prev, next).
+     * Ensure chapters FORWARD from the given index are loaded (xuôi).
+     * Loads current chapter + 2 chapters ahead.
+     * Không load ngược để tránh LazyColumn nhảy do prepend items.
      */
     private fun ensureChaptersLoaded(chapterIndex: Int) {
-        val startIdx = (chapterIndex - 2).coerceAtLeast(0)
         val endIdx = (chapterIndex + 2).coerceAtMost(rawChapters.size - 1)
         var changed = false
-        for (i in startIdx..endIdx) {
+        for (i in chapterIndex..endIdx) {
             if (i !in sentenceCache) {
                 val chunker = TextChunker()
                 val sents = chunker.splitSentences(rawChapters[i].content)
                 sentenceCache[i] = sents
                 changed = true
             }
+        }
+        // Cũng load 1 chương ngược nếu chưa có (chỉ 1, tránh nhảy nhiều)
+        val prevIdx = chapterIndex - 1
+        if (prevIdx >= 0 && prevIdx !in sentenceCache) {
+            val chunker = TextChunker()
+            val sents = chunker.splitSentences(rawChapters[prevIdx].content)
+            sentenceCache[prevIdx] = sents
+            changed = true
         }
         if (changed) rebuildDisplay()
     }
