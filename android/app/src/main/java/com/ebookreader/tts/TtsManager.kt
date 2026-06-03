@@ -19,6 +19,9 @@ class TtsManager(
     private var sentences: List<SentenceSpan> = emptyList()
     private var currentSentenceIndex = 0
 
+    // Guard: prevent playNextSentence from firing after stop()
+    private var stopped = false
+
     // Pre-buffer: keep N sentences ready in advance
     private val prebufferMap = ConcurrentHashMap<Int, ByteArray>()
     private val prebufferJobs = ConcurrentHashMap<Int, Job>()
@@ -45,7 +48,9 @@ class TtsManager(
         audioCache = AudioCache(File(context.cacheDir, "tts_cache"))
 
         player.onPlaybackComplete = {
-            playNextSentence()
+            if (!stopped) {
+                playNextSentence()
+            }
         }
     }
 
@@ -67,6 +72,7 @@ class TtsManager(
     fun play() {
         when (state) {
             TtsState.IDLE, TtsState.STOPPED -> {
+                stopped = false
                 clearPrebuffer()
                 // Play from currentSentenceIndex (may have been set by seekToSentence)
                 playSentence(currentSentenceIndex)
@@ -90,6 +96,7 @@ class TtsManager(
 
     fun stop() {
         playJob?.cancel()
+        stopped = true
         clearPrebuffer()
         player.stop()
         setState(TtsState.STOPPED)

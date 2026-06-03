@@ -58,13 +58,6 @@ fun ReaderScreen(
         }
     }
 
-    // Auto-save progress when leaving the screen
-    DisposableEffect(Unit) {
-        onDispose {
-            viewModel.saveProgress()
-        }
-    }
-
     // Auto-scroll: chỉ scroll khi câu đang đọc vượt quá item cuối trên màn hình
     LaunchedEffect(currentSentenceIndex) {
         // Find display index for current flat sentence

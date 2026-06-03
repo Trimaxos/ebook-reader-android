@@ -23,6 +23,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     private val db = AppDatabase.getInstance(application)
     private val parser = EpubParser()
+    private val bookCache = BookCache(application)
     private val dataStore = application.readerDataStore
 
     val ttsClient = TtsClient()
@@ -38,7 +39,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
     val displayItems: StateFlow<List<DisplayItem>> = _displayItems.asStateFlow()
 
     // Sentence count per chapter (for flat index ↔ chapter mapping)
-    private var sentenceCountsPerChapter = mutableListOf<Int>()
+    private var sentenceCountsPerChapter: List<Int> = emptyList()
 
     // Current position (flat index across all chapters)
     private val _currentSentenceIndex = MutableStateFlow(0)
@@ -90,7 +91,17 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         this.book = book
         viewModelScope.launch {
             _currentChapter.value = null
-            // Parse EPUB on IO thread
+
+            // Check cache first (fast path)
+            val cached = withContext(Dispatchers.IO) {
+                bookCache.get(book.id, book.filePath)
+            }
+            if (cached != null) {
+                applyCachedData(book, cached)
+                return@launch
+            }
+
+            // No cache: parse EPUB + split sentences (slow path)
             val (chapters, _) = withContext(Dispatchers.IO) {
                 parser.parse(getApplication(), book.filePath)
             }
@@ -104,13 +115,9 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             val chunker = TextChunker()
 
             for ((chIdx, ch) in chapters.withIndex()) {
-                // Add chapter header
                 displayItems.add(DisplayItem.Header(chIdx, ch.title))
-
-                // Parse sentences for this chapter
                 val chSents = chunker.splitSentences(ch.content)
                 counts.add(chSents.size)
-
                 for (s in chSents) {
                     val flatIdx = allSpans.size
                     allSpans.add(s)
@@ -124,18 +131,47 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             _allSentenceSpans.value = allSpans
             _displayItems.value = displayItems
 
-            // Restore progress
-            val progress = db.readingProgressDao().getProgress(book.id)
+            // Save to cache for next time
+            withContext(Dispatchers.IO) {
+                bookCache.put(book.id, book.filePath, BookCache.CachedBook(
+                    chapters = chapters,
+                    displayItems = displayItems,
+                    sentenceCountsPerChapter = counts,
+                    allSentenceSpans = allSpans
+                ))
+            }
+
+            restoreProgress(book)
+        }
+    }
+
+    /**
+     * Apply cached book data (load from cache, skip parsing).
+     */
+    private fun applyCachedData(book: Book, cached: BookCache.CachedBook) {
+        _chapters.value = cached.chapters
+        sentenceCountsPerChapter = cached.sentenceCountsPerChapter
+        _allSentenceSpans.value = cached.allSentenceSpans
+        _displayItems.value = cached.displayItems
+        restoreProgress(book)
+    }
+
+    /**
+     * Restore reading progress after display items are ready.
+     */
+    private fun restoreProgress(book: Book) {
+        viewModelScope.launch {
+            val progress = withContext(Dispatchers.IO) {
+                db.readingProgressDao().getProgress(book.id)
+            }
             val startChapter = progress?.chapterIndex ?: book.lastReadChapter
             val sentenceOffset = progress?.charOffset ?: 0
 
-            // Convert chapter + offset → flat index
             val flatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
             _currentSentenceIndex.value = flatIndex
             updateCurrentChapter(flatIndex)
 
-            // Load ALL sentences into TTS (plays seamlessly across chapters)
-            ttsManager.loadSentences(allSpans)
+            ttsManager.loadSentences(_allSentenceSpans.value)
             ttsManager.seekToSentence(flatIndex)
         }
     }
