@@ -121,35 +121,37 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             _currentChapterIndex.value = startChapter
             _currentSentenceInChapter.value = sentenceOffset
             if (startChapter in chapters.indices) _currentChapter.value = chapters[startChapter]
-            currentFlatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
+            currentFlatIndex = chapterToFlatIndex(startChapter, sentenceOffset)
             _currentSentenceIndex.value = currentFlatIndex
             ttsManager.seekToSentence(currentFlatIndex)
         }
     }
 
     /**
-     * Ensure specified chapter + lookahead chapters are loaded (sentences split + cached).
+     * Ensure chapters around the given index are loaded.
+     * Loads ±2 chapters (current, prev, next).
      */
     private fun ensureChaptersLoaded(chapterIndex: Int) {
-        val endIdx = (chapterIndex + LOOKAHEAD_CHAPTERS)
-            .coerceAtMost(rawChapters.size - 1)
-        for (i in chapterIndex..endIdx) {
+        val startIdx = (chapterIndex - 2).coerceAtLeast(0)
+        val endIdx = (chapterIndex + 2).coerceAtMost(rawChapters.size - 1)
+        var changed = false
+        for (i in startIdx..endIdx) {
             if (i !in sentenceCache) {
                 val chunker = TextChunker()
                 val sents = chunker.splitSentences(rawChapters[i].content)
                 sentenceCache[i] = sents
+                changed = true
             }
         }
-        rebuildDisplay()
+        if (changed) rebuildDisplay()
     }
 
     /**
-     * Rebuild display items + TTS sentences from cached chapters.
+     * Rebuild display items + TTS sentences from ALL cached chapters.
      */
     private fun rebuildDisplay() {
         val items = mutableListOf<DisplayItem>()
         val allSpans = mutableListOf<SentenceSpan>()
-        val counts = mutableListOf<Int>()
         var flatIdx = 0
 
         val sortedChs = sentenceCache.keys.sorted()
@@ -157,7 +159,6 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             if (chIdx !in rawChapters.indices) continue
             items.add(DisplayItem.Header(chIdx, rawChapters[chIdx].title))
             val sents = sentenceCache[chIdx]!!
-            counts.add(sents.size)
             for (s in sents) {
                 items.add(DisplayItem.Sentence(flatIndex = flatIdx, chapterIndex = chIdx, span = s))
                 allSpans.add(s)
@@ -165,7 +166,6 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             }
         }
 
-        sentenceCountsPerChapter = counts
         _displayItems.value = items
         ttsManager.loadSentences(allSpans)
     }
@@ -178,7 +178,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         _currentChapterIndex.value = chapterIndex
         _currentSentenceInChapter.value = 0
         if (chapterIndex in rawChapters.indices) _currentChapter.value = rawChapters[chapterIndex]
-        currentFlatIndex = chapterAndOffsetToFlatIndex(chapterIndex, 0)
+        currentFlatIndex = chapterToFlatIndex(chapterIndex, 0)
         _currentSentenceIndex.value = currentFlatIndex
         ttsManager.seekToSentence(currentFlatIndex)
     }
@@ -203,6 +203,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     fun stop() { ttsManager.stop() }
 
+    /** Called by Screen when a chapter becomes visible (scroll detection). */
+    fun onChapterViewed(chapterIndex: Int) {
+        ensureChaptersLoaded(chapterIndex)
+    }
+
     fun saveProgress() {
         book?.let { b ->
             val (chIdx, offset) = flatIndexToChapterAndOffset(currentFlatIndex)
@@ -225,22 +230,27 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     // ── Helpers ──
 
-    private fun chapterAndOffsetToFlatIndex(chapterIndex: Int, offset: Int): Int {
+    /** Chapter index + offset → flat index (dùng loaded chapters order) */
+    private fun chapterToFlatIndex(chapterIndex: Int, offset: Int): Int {
         var result = 0
-        for (i in 0 until chapterIndex.coerceAtMost(sentenceCountsPerChapter.size)) {
-            result += sentenceCountsPerChapter[i]
+        for (chIdx in sentenceCache.keys.sorted()) {
+            if (chIdx >= chapterIndex) break
+            result += sentenceCache[chIdx]!!.size
         }
         return result + offset
     }
 
+    /** Flat index → chapter index + offset in chapter */
     private fun flatIndexToChapterAndOffset(flatIndex: Int): Pair<Int, Int> {
-        if (flatIndex <= 0 || sentenceCountsPerChapter.isEmpty()) return Pair(0, 0)
+        val indices = sentenceCache.keys.sorted()
+        if (flatIndex <= 0 || indices.isEmpty()) return Pair(indices.firstOrNull() ?: 0, 0)
         var remaining = flatIndex
-        for ((chIdx, count) in sentenceCountsPerChapter.withIndex()) {
+        for (chIdx in indices) {
+            val count = sentenceCache[chIdx]!!.size
             if (remaining < count) return Pair(chIdx, remaining)
             remaining -= count
         }
-        val lastIdx = (sentenceCountsPerChapter.size - 1).coerceAtLeast(0)
-        return Pair(lastIdx, sentenceCountsPerChapter.getOrElse(lastIdx) { 0 })
+        val last = indices.last()
+        return Pair(last, sentenceCache[last]?.size ?: 0)
     }
 }

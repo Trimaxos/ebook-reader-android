@@ -72,6 +72,18 @@ fun ReaderScreen(
         }
     }
 
+    // Load more chapters when user scrolls to new content
+    LaunchedEffect(lazyListState.firstVisibleItemIndex) {
+        val idx = lazyListState.firstVisibleItemIndex
+        if (idx >= 0 && idx < displayItems.size) {
+            val item = displayItems[idx]
+            when (item) {
+                is DisplayItem.Header -> viewModel.onChapterViewed(item.chapterIndex)
+                is DisplayItem.Sentence -> viewModel.onChapterViewed(item.chapterIndex)
+            }
+        }
+    }
+
     LaunchedEffect(book.id) {
         viewModel.loadBook(book)
     }
