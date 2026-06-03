@@ -92,16 +92,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _currentChapter.value = null
 
-            // Check cache first (fast path)
-            val cached = withContext(Dispatchers.IO) {
-                bookCache.get(book.id, book.filePath)
-            }
-            if (cached != null) {
-                applyCachedData(book, cached)
-                return@launch
-            }
-
-            // No cache: parse EPUB + split sentences (slow path)
+            // Parse EPUB + split sentences
             val (chapters, _) = withContext(Dispatchers.IO) {
                 parser.parse(getApplication(), book.filePath)
             }
@@ -131,17 +122,31 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
             _allSentenceSpans.value = allSpans
             _displayItems.value = displayItems
 
-            // Save to cache for next time
-            withContext(Dispatchers.IO) {
-                bookCache.put(book.id, book.filePath, BookCache.CachedBook(
-                    chapters = chapters,
-                    displayItems = displayItems,
-                    sentenceCountsPerChapter = counts,
-                    allSentenceSpans = allSpans
-                ))
-            }
+            // Save to cache for next time (best-effort, không crash nếu lỗi)
+            try {
+                withContext(Dispatchers.IO) {
+                    bookCache.put(book.id, book.filePath, BookCache.CachedBook(
+                        chapters = chapters,
+                        displayItems = displayItems,
+                        sentenceCountsPerChapter = counts,
+                        allSentenceSpans = allSpans
+                    ))
+                }
+            } catch (_: Exception) { }
 
-            restoreProgress(book)
+            // Restore progress (inline, không launch riêng)
+            val progress = withContext(Dispatchers.IO) {
+                db.readingProgressDao().getProgress(book.id)
+            }
+            val startChapter = progress?.chapterIndex ?: book.lastReadChapter
+            val sentenceOffset = progress?.charOffset ?: 0
+
+            val flatIndex = chapterAndOffsetToFlatIndex(startChapter, sentenceOffset)
+            _currentSentenceIndex.value = flatIndex
+            updateCurrentChapter(flatIndex)
+
+            ttsManager.loadSentences(allSpans)
+            ttsManager.seekToSentence(flatIndex)
         }
     }
 
