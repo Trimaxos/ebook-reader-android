@@ -74,8 +74,10 @@ class TtsManager(
                 fillPrebuffer()
             }
             TtsState.PAUSED -> {
-                player.resume()
-                setState(TtsState.PLAYING)
+                // Restart từ vị trí hiện tại (an toàn khi app background rồi vào lại)
+                player.stop()
+                playSentence(currentSentenceIndex)
+                fillPrebuffer()
             }
             else -> {}
         }
