@@ -43,6 +43,7 @@ fun LibraryScreen(
     val books by viewModel.books.collectAsState()
     val importState by viewModel.importState.collectAsState()
     var showDeleteDialog by remember { mutableStateOf<Book?>(null) }
+    val snackbarHostState = remember { SnackbarHostState() }
 
     val filePickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -50,7 +51,19 @@ fun LibraryScreen(
         uri?.let { viewModel.importBook(it) }
     }
 
+    // Show error snackbar when import fails
+    LaunchedEffect(importState) {
+        if (importState is ImportState.Error) {
+            snackbarHostState.showSnackbar(
+                message = (importState as ImportState.Error).message,
+                duration = SnackbarDuration.Short
+            )
+            viewModel.clearImportState()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("Thư viện sách") },
@@ -66,7 +79,7 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { filePickerLauncher.launch(arrayOf("application/epub+zip", "text/plain", "application/x-mobipocket-ebook", "application/x-pilot-prc", "*/*")) }
+                onClick = { filePickerLauncher.launch(arrayOf("*/*")) }
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Nhập sách")
             }

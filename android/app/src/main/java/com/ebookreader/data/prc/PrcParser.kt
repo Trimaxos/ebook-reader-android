@@ -157,10 +157,10 @@ class PrcParser {
 
         if (mobiMagicPos >= 0) {
             val mobiStart = mobiMagicPos
-            // length of mobi header (at offset 8 from MOBI)
-            val mobiLength = readInt32(fileBytes, mobiStart + 8)
-            // mobi type (offset 0): 2=mobipocket book, 3=text, 4=etc
-            val mobiType = readInt32(fileBytes, mobiStart)
+            // length of mobi header (at offset 4 from MOBI)
+            val mobiLength = readInt32(fileBytes, mobiStart + 4)
+            // mobi type (offset 8): 2=mobipocket book, 3=text, 4=etc
+            val mobiType = readInt32(fileBytes, mobiStart + 8)
             if (mobiType == 2) {
                 // Encoding (offset 10)
                 // title offset from start of MOBI header (varies by version)
@@ -313,14 +313,9 @@ class PrcParser {
         if (data.size < 8) return ""
         // First 2 bytes: compression type (unused here, we already know it)
         // Next 2 bytes: uncompressed length
-        // The compressed data starts at offset 4 (or sometimes 16 with full header)
-
-        // Skip the PalmDOC header (16 bytes if present, else 8)
-        // The first 2 bytes tell us the record count in the full file
-        // but for individual record decompression, we start at 16
-        var pos = 16
-        if (pos >= data.size) pos = 8
-        if (pos >= data.size) pos = 2
+        // PalmDOC header: 2 bytes compression type + 2 bytes uncompressed length
+        // Compressed data starts at offset 4
+        var pos = 4
         if (pos >= data.size) return ""
 
         val output = ByteArrayOutputStream(data.size * 2) // over-allocate
