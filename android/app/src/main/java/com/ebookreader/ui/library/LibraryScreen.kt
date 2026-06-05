@@ -66,7 +66,7 @@ fun LibraryScreen(
         },
         floatingActionButton = {
             FloatingActionButton(
-                onClick = { filePickerLauncher.launch(arrayOf("application/epub+zip", "text/plain")) }
+                onClick = { filePickerLauncher.launch(arrayOf("application/epub+zip", "text/plain", "application/x-mobipocket-ebook", "application/x-pilot-prc", "*/*")) }
             ) {
                 Icon(Icons.Default.Add, contentDescription = "Nhập sách")
             }

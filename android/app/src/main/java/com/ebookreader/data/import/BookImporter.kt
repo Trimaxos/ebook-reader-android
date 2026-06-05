@@ -3,8 +3,10 @@ package com.ebookreader.data.import
 import android.content.Context
 import android.net.Uri
 import com.ebookreader.data.db.AppDatabase
+import com.ebookreader.data.epub.BookMetadata
 import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.data.model.Book
+import com.ebookreader.data.prc.PrcParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -13,16 +15,22 @@ import java.io.FileOutputStream
 class BookImporter(private val context: Context) {
 
     private val db = AppDatabase.getInstance(context)
-    private val parser = EpubParser()
+    private val epubParser = EpubParser()
+    private val prcParser = PrcParser()
 
-    suspend fun importEpub(uri: Uri): Result<Book> = withContext(Dispatchers.IO) {
+    suspend fun importBook(uri: Uri): Result<Book> = withContext(Dispatchers.IO) {
         try {
-            // Copy file to app storage
-            val fileName = "book_${System.currentTimeMillis()}.epub"
+            // Detect file extension from URI
+            val fileName = uri.lastPathSegment?.substringAfterLast('/') ?: "book_${System.currentTimeMillis()}"
+            val ext = fileName.substringAfterLast('.', "").lowercase()
+            val isPrc = ext == "prc" || ext == "mobi"
+
+            val destName = "book_${System.currentTimeMillis()}.$ext"
             val destDir = File(context.filesDir, "books")
             destDir.mkdirs()
-            val destFile = File(destDir, fileName)
+            val destFile = File(destDir, destName)
 
+            // Copy file to app storage
             context.contentResolver.openInputStream(uri)?.use { input ->
                 FileOutputStream(destFile).use { output ->
                     input.copyTo(output)
@@ -30,12 +38,16 @@ class BookImporter(private val context: Context) {
             } ?: return@withContext Result.failure(Exception("Cannot open file"))
 
             // Parse metadata
-            val (_, metadata) = parser.parse(context, destFile.absolutePath)
+            val (chapters, metadata) = if (isPrc) {
+                prcParser.parse(context, destFile.absolutePath)
+            } else {
+                epubParser.parse(context, destFile.absolutePath)
+            }
 
             // Save cover image
             var coverPath: String? = null
             metadata.coverImage?.let { bytes ->
-                val coverFile = File(destDir, "${fileName}_cover.jpg")
+                val coverFile = File(destDir, "${destName}_cover.jpg")
                 coverFile.writeBytes(bytes)
                 coverPath = coverFile.absolutePath
             }
@@ -46,7 +58,7 @@ class BookImporter(private val context: Context) {
                 author = metadata.author,
                 filePath = destFile.absolutePath,
                 coverPath = coverPath,
-                totalChapters = parser.getChapterCount(destFile.absolutePath)
+                totalChapters = chapters.size
             )
 
             // Save to DB

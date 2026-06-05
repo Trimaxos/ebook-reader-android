@@ -25,7 +25,7 @@ class LibraryViewModel(application: Application) : AndroidViewModel(application)
     fun importBook(uri: Uri) {
         viewModelScope.launch {
             _importState.value = ImportState.Importing
-            val result = importer.importEpub(uri)
+            val result = importer.importBook(uri)
             _importState.value = if (result.isSuccess) {
                 ImportState.Success(result.getOrThrow())
             } else {

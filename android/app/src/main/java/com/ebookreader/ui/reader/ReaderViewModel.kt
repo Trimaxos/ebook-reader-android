@@ -10,6 +10,7 @@ import com.ebookreader.data.epub.EpubParser
 import com.ebookreader.data.model.Book
 import com.ebookreader.data.model.Chapter
 import com.ebookreader.data.model.ReadingProgress
+import com.ebookreader.data.prc.PrcParser
 import com.ebookreader.tts.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.*
@@ -23,6 +24,7 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
 
     private val db = AppDatabase.getInstance(application)
     private val parser = EpubParser()
+    private val prcParser = PrcParser()
     private val dataStore = application.readerDataStore
 
     val ttsClient = TtsClient()
@@ -91,8 +93,11 @@ class ReaderViewModel(application: Application) : AndroidViewModel(application) 
         viewModelScope.launch {
             _currentChapter.value = null
             // Parse EPUB on IO thread
+            val ext = book.filePath.substringAfterLast('.').lowercase()
+            val isPrc = ext == "prc" || ext == "mobi"
             val (chapters, _) = withContext(Dispatchers.IO) {
-                parser.parse(getApplication(), book.filePath)
+                if (isPrc) prcParser.parse(getApplication(), book.filePath)
+                else parser.parse(getApplication(), book.filePath)
             }
             if (chapters.isEmpty()) return@launch
             _chapters.value = chapters
