@@ -109,7 +109,7 @@ class PrcParser {
         val name = String(nameBytes, Charsets.UTF_8).trimEnd('\u0000').trimEnd()
         val attributes = buffer.getShort().toInt() and 0xFFFF
         val version = buffer.getShort().toInt() and 0xFFFF
-        buffer.position(buffer.position() + 4 * 4) // skip 4 date fields
+        buffer.position(buffer.position() + 3 * 4) // skip 3 date fields
         buffer.position(buffer.position() + 4)     // modification number
         buffer.position(buffer.position() + 4)     // app info ID
         buffer.position(buffer.position() + 4)     // sort info ID
